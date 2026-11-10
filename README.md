@@ -33,7 +33,7 @@
 - 母字同答案只用香港《常用字字形表》嘅字（Unicode Unihan `kHKGlyph`），再限小學字表（`kGradeLevel`）或者常用頻率 1–3（`kFrequency`），共大約 2,700 字。
 - 簡體字（有繁體對應、唔喺 Big5、唔喺香港字表）唔會做答案；揀到會彈「係簡體字」提示。
 - 筆畫形狀用 Make Me a Hanzi 嘅楷書筆畫（Arphic 字型）。
-- 而家有 293 關，由 4 畫（例如「木」：一、八、十、大、木）去到 17 畫（例如「賽」，24 隻字）。
+- 而家有 289 關，由 4 畫（例如「友」：一、人、又、大、友）去到 17 畫。
 
 ### 檔案
 | 檔案 | 用途 |
@@ -66,9 +66,16 @@ node <repo>/tools/build_levels.mjs ~/cp-data --debug 湘 木
 ```
 
 點樣判斷「揀嘅筆畫係咪一隻字」（`build_levels.mjs`）：
-1. 拆解樹：Make Me a Hanzi 嘅部件（例如「湘」入面嘅「木」「目」「相」）一定算。
-2. 筆畫配對：候選字每一筆按筆順對應母字其中一筆（筆形、轉角數目要似），再檢查筆畫之間嘅關係（交叉、相接、分開）同上下左右位置，最後將成組筆畫拉到同一個方框比較形狀（分數 < 0.26 先算）。
-3. 同一組筆畫只會俾最似嗰隻字。
+1. 拆解樹：Make Me a Hanzi 嘅部件，3 筆以上（例如「湘」入面嘅「木」「目」「相」）一定算；1–2 筆嘅細部件都要過下面嘅形狀檢查。
+2. 筆畫配對：候選字每一筆按筆順對應母字其中一筆。每對筆畫：轉角數目一樣、方向差唔多（直筆同撇要分得開）、拉正之後長度差唔多（一點唔可以當一橫）。
+3. 筆畫之間嘅關係要一樣：交叉同唔交叉完全唔同（例如「大」同「丈」、「人」同「乂」）。
+4. 最後將成組筆畫拉到同一個方框比較形狀，分數 < 0.19 先算。
+5. 同一組筆畫只會俾最似嗰隻字。
+
+改完門檻用對照表檢查（每個答案「最差」嗰組筆畫 vs 真字）：
+```bash
+node <repo>/tools/build_levels.mjs ~/cp-data --review review.html 友 果 硬
+```
 
 ## 授權
 - 筆畫數據（`levels.js` 入面嘅筆畫）：由 [Make Me a Hanzi](https://github.com/skishore/makemeahanzi) 嘅 `graphics.txt` 而嚟，源自 Arphic PL KaitiM GB 同 Arphic PL UKai，跟 Arphic Public License（`licenses/ARPHICPL.TXT`）。

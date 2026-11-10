@@ -14,7 +14,7 @@
 <title>拆字小偵探</title>
 <script>
 // 版本號：上載前一定要改（levels.js 會跟住呢個版本號載入）
-window.__CP_VER='2026-11-10-1';
+window.__CP_VER='2026-11-10-2';
 </script>
 <style>
 :root{
@@ -313,7 +313,14 @@ function renderPreview(){
   const cx = (x0 + x1) / 2, cy = 900 - (y0 + y1) / 2;
   pv.setAttribute('viewBox', (cx - size / 2) + ' ' + (cy - size / 2) + ' ' + size + ' ' + size);
   const g = document.createElementNS(NS, 'g'); g.setAttribute('transform', 'scale(1,-1) translate(0,-900)');
-  [...sel].sort((a, b) => a - b).forEach(i => { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', L.s[i]); p.setAttribute('fill', '#ff5a2c'); g.appendChild(p); });
+  // 每筆加白色外框（同大字一樣），重疊嘅筆畫先分得開
+  const sw = (size * 0.045).toFixed(1);
+  [...sel].sort((a, b) => a - b).forEach(i => {
+    const p = document.createElementNS(NS, 'path'); p.setAttribute('d', L.s[i]);
+    p.setAttribute('fill', '#ff5a2c'); p.setAttribute('stroke', '#fff'); p.setAttribute('stroke-width', sw);
+    p.setAttribute('stroke-linejoin', 'round'); p.setAttribute('paint-order', 'stroke');
+    g.appendChild(p);
+  });
   pv.appendChild(g);
 }
 
@@ -527,9 +534,11 @@ function renderRec(){
     body.appendChild(wrap);
     return;
   }
+  // 去過嘅關（關卡數據更新之後次序可能變咗，所以有紀錄嘅都顯示）
   const top = Math.min(LV.length - 1, S.max || 0);
-  for (let i = top; i >= 0; i--) {
+  for (let i = LV.length - 1; i >= 0; i--) {
     const l = LV[i], r = S.lv[l.c];
+    if (i > top && !r) continue;
     const row = document.createElement('button'); row.className = 'lvrow' + (i === li ? ' cur' : '');
     let st, col;
     if (r && r.done) { st = '⭐'.repeat(r.stars || 1) + ' 完成'; col = 'var(--good)'; }

@@ -94,10 +94,15 @@ const DEG = Math.PI / 180;
 
 // 形狀大致相似（唔理位置同大小）
 function shapeCompat(a, b) {
-  let s = 0;
-  for (let i = 0; i < a.dirs.length; i++) s += angDiff(a.dirs[i], b.dirs[i]);
+  let s = 0, mx = 0;
+  for (let i = 0; i < a.dirs.length; i++) {
+    const d = angDiff(a.dirs[i], b.dirs[i]);
+    s += d;
+    if (i > 0 && i < a.dirs.length - 1 && a.corners === 0) mx = Math.max(mx, d); // 冇轉角嘅筆先比，唔計起筆收筆
+  }
   s /= a.dirs.length;
-  return a.corners === b.corners && s < 40 * DEG && angDiff(a.chord, b.chord) < 36 * DEG;
+  if (mx > 50 * DEG) return false; // 例如「丿」尾段向左，「丨」一直向下
+  return a.corners === b.corners && s < 36 * DEG && angDiff(a.chord, b.chord) < 30 * DEG;
 }
 
 function bbox(strokes) {
@@ -147,9 +152,10 @@ function relMatrix(F) {
   return R;
 }
 const relCost = (x, b) => {
-  if (x < 2 && b < 2) return Math.abs(x - b);
+  if (x < 2 && b < 2) return 0.6 * Math.abs(x - b); // 相接程度差：位置誤差已經計咗一部分
   if (x === 2 && b === 2) return 0;
-  return (2 - Math.min(x, b)) / 2; // 交叉↔相接 0.5、交叉↔分開 1
+  // 交叉同唔交叉完全唔同（例如「大」同「丈」、「人」同「乂」）：交叉↔相接 1、交叉↔分開 1.5
+  return 1 + 0.5 * (1 - Math.min(x, b));
 };
 
 const AR_MAX = +(process.env.AR_MAX || 3.6);
@@ -164,6 +170,7 @@ function normalizer(strokes) {
 
 // 一組母字筆畫（已經按次序對應咗候選字每一筆）有幾似候選字
 // 先按成組筆畫嘅外框拉正，再沿筆畫重新取點（唔係先取點再拉正：窄嘅「目」入面個「口」直筆長好多，點會分佈唔同）
+function arcLen(pts) { let l = 0; for (let k = 1; k < pts.length; k++) l += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]); return l; }
 function normStrokes(strokes) {
   const nz = normalizer(strokes);
   return { aspect: nz.aspect, pts: strokes.map(st => resample(st.raw.map(nz.f), K).pts) };
@@ -175,9 +182,13 @@ function geomScore(bStrokes, xStrokes) {
   if (!nx) { nx = normStrokes(xStrokes); xNormCache.set(xStrokes, nx); }
   const ar = nb.aspect / nx.aspect;
   if (ar > AR_MAX || ar < 1 / AR_MAX) return null;
-  let total = 0, worst = 0;
+  let total = 0, worst = 0, lenPen = 0;
   for (let i = 0; i < xStrokes.length; i++) {
     const pb = nb.pts[i], px = nx.pts[i];
+    // 拉正之後每筆長度要差唔多（一點唔可以當一橫）
+    const lb = arcLen(pb), lx = arcLen(px), lr = Math.log(Math.max(lb, 0.02) / Math.max(lx, 0.02));
+    if (Math.abs(lr) > Math.log(2.2)) return null;
+    lenPen += Math.max(0, Math.abs(lr) - Math.log(1.35));
     let e = 0;
     for (let k = 0; k < K; k++) e += Math.hypot(pb[k][0] - px[k][0], pb[k][1] - px[k][1]);
     e /= K;
@@ -190,14 +201,15 @@ function geomScore(bStrokes, xStrokes) {
   const mean = total / xStrokes.length;
   // 大細比例相差太遠扣少少分
   const arPen = Math.abs(Math.log(ar)) * 0.03;
-  return { mean, worst, score: mean + 0.35 * worst + arPen };
+  return { mean, worst, lenPen, score: mean + 0.35 * worst + arPen + 0.12 * lenPen };
 }
 
-const SCORE_OK = +(process.env.SCORE_OK || 0.26);
+const SCORE_OK = +(process.env.SCORE_OK || 0.19);
+const REL_W = +(process.env.REL_W || 0.06);
 const MEAN_OK = +(process.env.MEAN_OK || 0.17), WORST_OK = +(process.env.WORST_OK || 0.28);
 
 // 搵晒母字 B 入面所有可以砌成候選字 X 嘅筆畫組合（保持筆順次序）
-const relBudget = n => 0.6 + 0.08 * n * (n - 1) / 2;
+const relBudget = n => 0.45 + 0.06 * n * (n - 1) / 2;
 function findSubsets(BF, XF, RB, RX, limit = 4000) {
   const n = XF.length, m = BF.length;
   if (n > m) return [];
@@ -221,7 +233,7 @@ function findSubsets(BF, XF, RB, RX, limit = 4000) {
     if (++visits > 400000) return;
     if (i === n) {
       const g = geomScore(pick.map(j => BF[j]), XF);
-      if (g && g.mean < MEAN_OK && g.worst < WORST_OK) found.push({ idx: pick.slice(), ...g, rel: cost, score: g.score + 0.04 * cost });
+      if (g && g.mean < MEAN_OK && g.worst < WORST_OK) found.push({ idx: pick.slice(), ...g, rel: cost, score: g.score + REL_W * cost });
       return;
     }
     for (let j = from; j <= m - (n - i); j++) {
@@ -297,6 +309,19 @@ function components(ch, strokeIdx, out, depth = 0) {
   })(tree, []);
 }
 
+// 指定咗對應（部件）：筆形、關係、形狀用寬鬆門檻檢查，回傳分數或者 null
+function checkMapping(BF, XF, RB, RX, idx) {
+  if (idx.length !== XF.length) return null;
+  for (let i = 0; i < XF.length; i++) if (!shapeCompat(XF[i], BF[idx[i]])) return null;
+  let cost = 0;
+  for (let a = 0; a < XF.length; a++) for (let b = a + 1; b < XF.length; b++) cost += relCost(RX[a][b], RB[idx[a]][idx[b]]);
+  if (cost > relBudget(XF.length)) return null;
+  const g = geomScore(idx.map(j => BF[j]), XF);
+  if (!g || g.mean > MEAN_OK || g.worst > WORST_OK) return null;
+  const sc = g.score + REL_W * cost;
+  return sc < 0.24 ? sc : null;
+}
+
 function solveBase(B) {
   const BF = feat(B), m = BF.length, RB = rels(B);
   const bySubset = new Map(); // mask → [{ch, score, simp}]
@@ -316,7 +341,14 @@ function solveBase(B) {
   // 拆解樹入面嘅部件（例如「湘」入面嘅「木」「目」「相」）一定算
   const comps = [];
   components(B, [...Array(m).keys()], comps);
-  for (const { c, idx } of comps) if (isKid(c)) add(c, [{ idx, score: 0.02 }], false);
+  // 部件：3 筆以上（例如「湘」入面嘅「木」「目」、「媽」入面嘅「女」）照信；
+  // 1–2 筆嘅細部件要過形狀檢查，例如「慎」入面得一點嘅「乙」、「奪」入面分開咗嘅「人」唔算
+  for (const { c, idx } of comps) {
+    if (!isKid(c)) continue;
+    if (idx.length >= 3) { add(c, [{ idx, score: 0.02 }], false); continue; }
+    const sc = checkMapping(BF, feat(c), RB, rels(c), idx);
+    if (sc !== null) add(c, [{ idx, score: Math.max(0.02, sc - 0.05) }], false);
+  }
   for (const X of SIMP) {
     const n = nStrokes(X);
     if (n >= m) continue;
@@ -327,7 +359,7 @@ function solveBase(B) {
   for (const [key, list] of bySubset) {
     list.sort((a, b) => a.score - b.score);
     const best = list[0];
-    if (best.simp && best.score > 0.24) continue;
+    if (best.simp && best.score > SCORE_OK) continue;
     if (!best.simp && best.score > SCORE_OK) continue;
     const tgt = best.simp ? decoys : answers;
     if (!tgt.has(best.ch)) tgt.set(best.ch, []);
@@ -376,7 +408,7 @@ export function debugPair(B, X) {
     for (let j = from; j <= m - (n - i); j++) if (compat[i][j]) { pick[i] = j; dfs(i + 1, j + 1); }
   })(0, 0);
   res.sort((a, b) => (a.g ? a.g.score : 9) - (b.g ? b.g.score : 9));
-  for (const r of res.slice(0, 5)) console.log('  ', r.idx.join(','), r.g ? `mean ${r.g.mean.toFixed(3)} worst ${r.g.worst.toFixed(3)}` : 'rejected(dir/aspect)', 'ar', r.ar, 'rel', r.rc.toFixed(2), '/', relBudget(n).toFixed(2));
+  for (const r of res.slice(0, 5)) console.log('  ', r.idx.join(','), r.g ? `mean ${r.g.mean.toFixed(3)} worst ${r.g.worst.toFixed(3)} len ${r.g.lenPen.toFixed(2)} score ${(r.g.score + REL_W * r.rc).toFixed(3)}` : 'rejected(dir/aspect/len)', 'ar', r.ar, 'rel', r.rc.toFixed(2), '/', relBudget(n).toFixed(2));
 }
 if (process.argv.includes('--debug')) {
   const i = process.argv.indexOf('--debug');
@@ -395,7 +427,7 @@ if (process.argv.includes('--corners')) {
 }
 
 // ---------- 出關卡 ----------
-if (!TEST && !process.argv.some(a => a.startsWith('--'))) {
+if (!TEST && !process.argv.some(a => a.startsWith("--"))) {
     const t0 = Date.now();
   const bases = HK.filter(c => { const n = nStrokes(c); return n >= 4 && n <= 17; });
   const results = [];
@@ -448,4 +480,47 @@ if (!TEST && !process.argv.some(a => a.startsWith('--'))) {
   console.log(`bases ${bases.length}, usable ${results.length}, levels ${levels.length}, size ${(js.length / 1024).toFixed(0)} KB, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   console.log(levels.slice(0, 40).map((l, i) => `${i + 1}.${l.c}(${l.a.length})`).join(' '));
   console.log('...', levels.slice(-20).map(l => `${l.c}(${l.a.length})`).join(' '));
+}
+
+// ---------- 對照表：每個答案「最差」嗰組筆畫 vs 真字，俾人眼睇 ----------
+// node tools/build_levels.mjs <dataDir> --review out.html 友 林 果
+if (process.argv.includes('--review')) {
+  const i = process.argv.indexOf('--review');
+  const out = process.argv[i + 1];
+  const chars = process.argv.slice(i + 2).join('').split('');
+  const svgOf = (ch, idx) => {
+    const d = G.get(ch);
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    idx.forEach(k => d.medians[k].forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }));
+    const pad = 70, size = Math.max(x1 - x0 + 2 * pad, y1 - y0 + 2 * pad, 260);
+    const cx = (x0 + x1) / 2, cy = 900 - (y0 + y1) / 2;
+    return `<svg viewBox="${cx - size / 2} ${cy - size / 2} ${size} ${size}" width="64" height="64"><g transform="scale(1,-1) translate(0,-900)">${idx.map(k => `<path d="${d.strokes[k]}" fill="#ff5a2c" stroke="#fff" stroke-width="${size * 0.02}" paint-order="stroke"/>`).join('')}</g></svg>`;
+  };
+  const full = ch => svgOf(ch, [...Array(nStrokes(ch)).keys()]).replace(/#ff5a2c/g, '#2f3e4e');
+  let html = '<html><head><meta charset="utf-8"><style>body{font:12px sans-serif;margin:8px}h3{margin:10px 0 4px}.r{display:flex;flex-wrap:wrap;gap:6px}.c{border:1px solid #ccc;border-radius:6px;padding:3px;text-align:center;width:140px}.c svg{border:1px dashed #9cc}.bad{background:#ffe5e5}</style></head><body>';
+  for (const B of chars) {
+    const res = solveBase(B);
+    html += `<h3>${B}（${nStrokes(B)} 畫）</h3><div class="r">`;
+    for (const [ch, subs] of res.answers) {
+      if (ch === B) continue;
+      subs.sort((a, b) => b.score - a.score);
+      const w = subs[0];
+      html += `<div class="c${w.score > 0.15 ? ' bad' : ''}">${svgOf(B, w.idx)} ${full(ch)}<br>${ch} 最差 ${w.score.toFixed(3)} ×${subs.length}</div>`;
+    }
+    for (const [ch, subs] of res.decoys) html += `<div class="c" style="background:#eef">${svgOf(B, subs[0].idx)} ${full(ch)}<br>簡 ${ch} ${subs[0].score.toFixed(3)}</div>`;
+    html += '</div>';
+  }
+  fs.writeFileSync(out, html + '</body></html>');
+  console.log('wrote', out);
+}
+if (process.argv.includes('--comp')) {
+  const i = process.argv.indexOf('--comp'); const B = process.argv[i + 1];
+  const BF = feat(B), RB = rels(B), comps = []; components(B, [...Array(BF.length).keys()], comps);
+  for (const { c, idx } of comps) {
+    const XF = feat(c), RX = rels(c);
+    const sh = XF.map((x, k) => shapeCompat(x, BF[idx[k]]) ? 'ok' : 'NO').join(',');
+    let cost = 0; for (let a = 0; a < XF.length; a++) for (let b = a + 1; b < XF.length; b++) cost += relCost(RX[a][b], RB[idx[a]][idx[b]]);
+    const g = geomScore(idx.map(j => BF[j]), XF);
+    console.log(c, idx.join(','), 'shape', sh, 'rel', cost.toFixed(2), '/', (relBudget(XF.length) * 1.5).toFixed(2), g ? `mean ${g.mean.toFixed(3)} worst ${g.worst.toFixed(3)} score ${(g.score + REL_W * cost).toFixed(3)}` : 'geom null', '→', checkMapping(BF, XF, RB, RX, idx));
+  }
 }
