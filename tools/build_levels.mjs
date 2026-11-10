@@ -204,7 +204,235 @@ function geomScore(bStrokes, xStrokes) {
   return { mean, worst, lenPen, score: mean + 0.35 * worst + arPen + 0.12 * lenPen };
 }
 
+// ================= 第三版：規則配對（Bill 2026-11-10 定） =================
+// 1. 每筆分類：橫 H、提 T、直 S、撇 P、點／捺 D（仲有少見嘅 U 向上、R 左上、W 向左）；有轉角就分段（例如 𠃌 = H,S）；收筆嘅鉤唔計
+// 2. 砌新字：每筆類型要一樣（撇唔可以當橫）
+// 3. 每兩筆：交叉、相接、分開要一樣（原本喺右邊唔可以變插穿；「下」個直要掂住個橫）；左右、上下位置要一樣
+// 4. 長度同距離唔理；幾隻字都合規則先用形狀分數揀最似嗰隻
+const TK = 32;
+const TYPE_TOL = +(process.env.TYPE_TOL || 15);
+function chordAng(p, i, j) { return Math.atan2(p[j][1] - p[i][1], p[j][0] - p[i][0]); }
+function strokeClass(a) {
+  const d = a / DEG;
+  if (d >= -25 && d < 20) return 'H';
+  if (d >= 20 && d < 80) return 'T';
+  if (d >= 80 && d < 110) return 'U';
+  if (d >= 110 && d < 165) return 'R';
+  if (d >= 165 || d < -172) return 'W';
+  if (d >= -172 && d < -103) return 'P';
+  if (d >= -103 && d < -75) return 'S';
+  return 'D';
+}
+function strokeType(raw) {
+  const pts = resample(raw, TK).pts;
+  const cum = [0];
+  for (let k = 1; k < TK; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  const L = cum[TK - 1] || 1;
+  // 收筆鉤：最後 30% 入面突然轉 > 95°
+  let end = TK - 1, hook = false;
+  for (let j = TK - 2; j >= 5; j--) {
+    if (L - cum[j] > 0.3 * L) break;
+    if (L - cum[j] < 0.03 * L) continue;
+    if (angDiff(chordAng(pts, Math.max(0, j - 5), j), chordAng(pts, j, TK - 1)) > 95 * DEG) { end = j; hook = true; break; }
+  }
+  // 轉角：離頭尾直線最遠嗰點偏離超過 20% 就喺度分段（圓角都搵到），最多分 4 段
+  const bounds = [0, end];
+  (function split(i0, i1, depth) {
+    if (depth > 2 || i1 - i0 < 4) return;
+    const ax = pts[i0], bx = pts[i1], len = Math.hypot(bx[0] - ax[0], bx[1] - ax[1]) || 1;
+    let best = -1, bd = 0;
+    for (let k = i0 + 2; k <= i1 - 2; k++) {
+      const d = Math.abs((bx[0] - ax[0]) * (ax[1] - pts[k][1]) - (ax[0] - pts[k][0]) * (bx[1] - ax[1])) / len;
+      if (d > bd) { bd = d; best = k; }
+    }
+    if (best < 0 || bd < 0.2 * Math.max(len, (cum[i1] - cum[i0]) * 0.8)) return;
+    bounds.push(best);
+    split(i0, best, depth + 1); split(best, i1, depth + 1);
+  })(0, end, 0);
+  bounds.sort((x, y) => x - y);
+  // 方向差唔多（< 55°）嘅相鄰段併埋；太短（< 15%）嘅段併埋
+  for (;;) {
+    let changed = false;
+    for (let q = 1; q < bounds.length - 1; q++) {
+      const a1 = chordAng(pts, bounds[q - 1], bounds[q]), a2 = chordAng(pts, bounds[q], bounds[q + 1]);
+      if (angDiff(a1, a2) < 55 * DEG) { bounds.splice(q, 1); changed = true; break; } // 例如「大」嘅豎撇（直落再撇）當一筆撇
+    }
+    if (!changed) for (let q = 0; q < bounds.length - 1 && bounds.length > 2; q++) {
+      if (cum[bounds[q + 1]] - cum[bounds[q]] < 0.15 * L) { bounds.splice(q === 0 ? 1 : q, 1); changed = true; break; }
+    }
+    if (!changed) break;
+  }
+  const pieces = [];
+  for (let q = 0; q < bounds.length - 1; q++) { const a = chordAng(pts, bounds[q], bounds[q + 1]); pieces.push({ a, c: strokeClass(a) }); }
+  return { hook, pieces, code: pieces.map(p => p.c).join('') + (hook ? '鉤' : '') };
+}
+const typeCache = new Map();
+function types(ch) {
+  if (!typeCache.has(ch)) typeCache.set(ch, G.get(ch).medians.map(strokeType));
+  return typeCache.get(ch);
+}
+function typeCompat(a, b) {
+  if (a.pieces.length !== b.pieces.length) return false;
+  for (let i = 0; i < a.pieces.length; i++) {
+    const p = a.pieces[i], q = b.pieces[i];
+    // 同一類（橫、提、直、撇、點）先得；分界附近（例如斜少少嘅直同點）差 15° 以內通融
+    if (p.c !== q.c && angDiff(p.a, q.a) > TYPE_TOL * DEG) return false;
+  }
+  return true;
+}
+// 交叉：中線相交，而且交點離兩筆頭尾都超過筆長 15%
+function crosses(A, B) {
+  const a = A.raw, b = B.raw;
+  const la = arcLenRaw(a), lb = arcLenRaw(b);
+  for (let i = 1; i < a.length; i++) for (let j = 1; j < b.length; j++) {
+    const r = segInter(a[i - 1], a[i], b[j - 1], b[j]);
+    if (!r) continue;
+    const p = [a[i - 1][0] + (a[i][0] - a[i - 1][0]) * r[0], a[i - 1][1] + (a[i][1] - a[i - 1][1]) * r[0]];
+    if (nearEnd(p, a) > Math.max(20, 0.15 * la) && nearEnd(p, b) > Math.max(20, 0.15 * lb)) return true;
+  }
+  return false;
+}
+function arcLenRaw(a) { let l = 0; for (let k = 1; k < a.length; k++) l += Math.hypot(a[k][0] - a[k - 1][0], a[k][1] - a[k - 1][1]); return l; }
+// 兩筆關係：交叉 X、相接 T、分開 A；相接程度喺中間嘅當「都得」（楷書有啲應該掂嘅筆畫留咗少少空）
+// 仲記低掂住／交叉嘅位置：pa、pb ＝ 喺第一筆、第二筆由頭去到尾嘅邊度（0 頭、0.5 中間、1 尾）
+// 例如「丁」：直筆個頭（0）掂住橫筆中間（0.5）；反轉咗（橫筆個頭掂住直筆中間）就唔係「丁」
+function nearestOn(p, poly) {
+  let best = { d: Infinity, u: 0 }, acc = 0;
+  const L = arcLenRaw(poly) || 1;
+  for (let i = 1; i < poly.length; i++) {
+    const a = poly[i - 1], b = poly[i], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, l = Math.sqrt(l2);
+    let t = l2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2 : 0; t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+    if (d < best.d) best = { d, u: (acc + t * l) / L };
+    acc += l;
+  }
+  return best;
+}
+function crossAt(A, B) { // 交叉點喺兩筆嘅位置
+  const a = A.raw, b = B.raw, la = arcLenRaw(a) || 1, lb = arcLenRaw(b) || 1;
+  let accA = 0;
+  for (let i = 1; i < a.length; i++) {
+    const segA = Math.hypot(a[i][0] - a[i - 1][0], a[i][1] - a[i - 1][1]);
+    let accB = 0;
+    for (let j = 1; j < b.length; j++) {
+      const segB = Math.hypot(b[j][0] - b[j - 1][0], b[j][1] - b[j - 1][1]);
+      const r = segInter(a[i - 1], a[i], b[j - 1], b[j]);
+      if (r) return { pa: (accA + r[0] * segA) / la, pb: (accB + r[1] * segB) / lb };
+      accB += segB;
+    }
+    accA += segA;
+  }
+  return null;
+}
+function link(A, B) {
+  if (crosses(A, B)) { const c = crossAt(A, B); return { k: 'X', pa: c ? c.pa : 0.5, pb: c ? c.pb : 0.5 }; }
+  const a = A.raw, b = B.raw;
+  const cand = [
+    { ...nearestOn(a[0], b), side: 'a', e: 0 }, { ...nearestOn(a.at(-1), b), side: 'a', e: 1 },
+    { ...nearestOn(b[0], a), side: 'b', e: 0 }, { ...nearestOn(b.at(-1), a), side: 'b', e: 1 },
+  ].sort((x, y) => x.d - y.d)[0];
+  const pa = cand.side === 'a' ? cand.e : cand.u, pb = cand.side === 'a' ? cand.u : cand.e;
+  const k = cand.d <= 40 ? 'T' : cand.d >= 75 ? 'A' : '?';
+  return { k, pa, pb };
+}
+const POS_TOL = +(process.env.POS_TOL || 0.3);
+function linkOk(x, b) {
+  if (x.k === 'X' || b.k === 'X') {
+    if (x.k !== b.k) return false;
+    return Math.abs(x.pa - b.pa) <= POS_TOL + 0.05 && Math.abs(x.pb - b.pb) <= POS_TOL + 0.05;
+  }
+  if (x.k === 'A' || b.k === 'A') return x.k === b.k || x.k === '?' || b.k === '?';
+  // 相接（或者差唔多相接）：掂住嘅位置要差唔多
+  return Math.abs(x.pa - b.pa) <= POS_TOL && Math.abs(x.pb - b.pb) <= POS_TOL;
+}
+const crossCache = new Map();
+function crossMatrix(ch) {
+  if (!crossCache.has(ch)) {
+    const F = feat(ch), M = F.map(() => new Array(F.length).fill(null));
+    for (let i = 0; i < F.length; i++) for (let k = i + 1; k < F.length; k++) M[i][k] = link(F[i], F[k]); // 只用 i < k
+    crossCache.set(ch, M);
+  }
+  return crossCache.get(ch);
+}
+// 候選字兩筆之間嘅左右上下：+1／−1，差唔多同一行（欄）＝ 0
+const DEAD = 0.12;
+function posSign(F, i, k, size) {
+  const dx = (F[k].cx - F[i].cx) / size, dy = (F[k].cy - F[i].cy) / size;
+  return [Math.abs(dx) < DEAD ? 0 : Math.sign(dx), Math.abs(dy) < DEAD ? 0 : Math.sign(dy)];
+}
+function posOk(sx, dB) { // sx：候選字嘅方向；dB：母字嗰兩筆（按揀咗嗰組筆畫大細）
+  if (sx === 0) return Math.abs(dB) < 0.25;
+  return sx * dB > -0.03;
+}
+// 形狀分數：只用嚟喺幾隻合規則嘅字入面揀最似（唔用嚟判斷啱唔啱）
+function rankScore(bStrokes, xStrokes) {
+  const nb = normStrokes(bStrokes);
+  let nx = xNormCache.get(xStrokes);
+  if (!nx) { nx = normStrokes(xStrokes); xNormCache.set(xStrokes, nx); }
+  let total = 0;
+  for (let i = 0; i < xStrokes.length; i++) {
+    let e = 0;
+    for (let k = 0; k < K; k++) e += Math.hypot(nb.pts[i][k][0] - nx.pts[i][k][0], nb.pts[i][k][1] - nx.pts[i][k][1]);
+    total += e / K;
+  }
+  return total / xStrokes.length + Math.abs(Math.log(nb.aspect / nx.aspect)) * 0.03;
+}
+// 指定對應（母字第 idx[i] 筆 ＝ 候選字第 i 筆）合唔合規則
+function ruleCheck(B, X, idx) {
+  const BF = feat(B), XF = feat(X), TB = types(B), TX = types(X), CB = crossMatrix(B), CX = crossMatrix(X);
+  const n = XF.length;
+  if (idx.length !== n) return null;
+  for (let i = 0; i < n; i++) if (!typeCompat(TX[i], TB[idx[i]])) return null;
+  const xb = bbox(XF), xs = Math.max(xb.w, xb.h, 1);
+  const sub = idx.map(j => BF[j]), bb = bbox(sub), bs = Math.max(bb.w, bb.h, 1);
+  for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) {
+    const lx = CX[i][k], lb = CB[idx[i]][idx[k]];
+    if (!linkOk(lx, lb)) return null;
+    // 掂住或者交叉：位置由掂住嘅地方決定（唔用中心點，因為長短會影響中心點）；分開先比左右上下
+    if (lx.k === 'T' || lx.k === 'X' || lb.k === 'T' || lb.k === 'X') continue;
+    const [sx, sy] = posSign(XF, i, k, xs);
+    if (!posOk(sx, (BF[idx[k]].cx - BF[idx[i]].cx) / bs) || !posOk(sy, (BF[idx[k]].cy - BF[idx[i]].cy) / bs)) return null;
+  }
+  return rankScore(sub, XF);
+}
+function findSubsetsRule(B, X, limit = 4000) {
+  const BF = feat(B), XF = feat(X), TB = types(B), TX = types(X), CB = crossMatrix(B), CX = crossMatrix(X);
+  const n = XF.length, m = BF.length;
+  if (n > m) return [];
+  const compat = TX.map(tx => TB.map(tb => typeCompat(tx, tb)));
+  const xb = bbox(XF), xs = Math.max(xb.w, xb.h, 1);
+  const sgn = [];
+  for (let i = 0; i < n; i++) { sgn.push([]); for (let k = 0; k < n; k++) sgn[i].push(i < k ? posSign(XF, i, k, xs) : null); }
+  const found = [], pick = [];
+  let visits = 0;
+  (function dfs(i, from) {
+    if (++visits > 400000 || found.length >= limit) return;
+    if (i === n) {
+      const sc = ruleCheck(B, X, pick);
+      if (sc !== null) found.push({ idx: pick.slice(), score: sc });
+      return;
+    }
+    for (let j = from; j <= m - (n - i); j++) {
+      if (!compat[i][j]) continue;
+      let ok = true;
+      for (let k = 0; k < i && ok; k++) {
+        const lx = CX[k][i], lb = CB[pick[k]][j];
+        if (!linkOk(lx, lb)) { ok = false; break; }
+        if (lx.k === 'T' || lx.k === 'X' || lb.k === 'T' || lb.k === 'X') continue;
+        // 剪枝：方向相反（用成隻母字大細，寬鬆）就唔使再試
+        const [sx, sy] = sgn[k][i], dx = BF[j].cx - BF[pick[k]].cx, dy = BF[j].cy - BF[pick[k]].cy;
+        if ((sx > 0 && dx < -20) || (sx < 0 && dx > 20) || (sy > 0 && dy < -20) || (sy < 0 && dy > 20)) ok = false;
+      }
+      if (!ok) continue;
+      pick[i] = j;
+      dfs(i + 1, j + 1);
+    }
+  })(0, 0);
+  return found;
+}
+
 const SCORE_OK = +(process.env.SCORE_OK || 0.19);
+const SHAPE_CAP = +(process.env.SHAPE_CAP || 0.4);
 const REL_W = +(process.env.REL_W || 0.06);
 const MEAN_OK = +(process.env.MEAN_OK || 0.17), WORST_OK = +(process.env.WORST_OK || 0.28);
 
@@ -336,31 +564,31 @@ function solveBase(B) {
     const n = nStrokes(X);
     if (n > m || (n === m && X !== B)) continue;
     if (X === B) { add(X, [{ idx: [...Array(m).keys()], score: 0 }], false); continue; }
-    add(X, findSubsets(BF, feat(X), RB, rels(X)), false);
+    add(X, findSubsetsRule(B, X), false);
   }
-  // 拆解樹入面嘅部件（例如「湘」入面嘅「木」「目」「相」）一定算
+  // 拆解樹入面嘅部件（例如「湘」入面嘅「木」「目」「相」）
   const comps = [];
   components(B, [...Array(m).keys()], comps);
   // 部件：3 筆以上（例如「湘」入面嘅「木」「目」、「媽」入面嘅「女」）照信；
-  // 1–2 筆嘅細部件要過形狀檢查，例如「慎」入面得一點嘅「乙」、「奪」入面分開咗嘅「人」唔算
+  // 1–2 筆嘅細部件要合規則（筆畫類型、交叉、位置），例如「慎」入面得一點嘅「乙」唔算
   for (const { c, idx } of comps) {
     if (!isKid(c)) continue;
     if (idx.length >= 3) { add(c, [{ idx, score: 0.02 }], false); continue; }
-    const sc = checkMapping(BF, feat(c), RB, rels(c), idx);
-    if (sc !== null) add(c, [{ idx, score: Math.max(0.02, sc - 0.05) }], false);
+    const sc = ruleCheck(B, c, idx);
+    if (sc !== null) add(c, [{ idx, score: Math.min(sc, 0.02) }], false);
   }
   for (const X of SIMP) {
     const n = nStrokes(X);
     if (n >= m) continue;
-    add(X, findSubsets(BF, feat(X), RB, rels(X)), true);
+    add(X, findSubsetsRule(B, X), true);
   }
-  // 同一組筆畫只俾最似嗰隻字
+  // 同一組筆畫只俾最似嗰隻字（規則已經判斷咗啱唔啱，形狀分數只用嚟揀）
   const answers = new Map(), decoys = new Map();
   for (const [key, list] of bySubset) {
     list.sort((a, b) => a.score - b.score);
     const best = list[0];
-    if (best.simp && best.score > SCORE_OK) continue;
-    if (!best.simp && best.score > SCORE_OK) continue;
+    // 規則合晒都要整體形狀唔可以太離譜（例如散到成隻字都係嘅「卞」）
+    if (best.score > SHAPE_CAP) continue;
     const tgt = best.simp ? decoys : answers;
     if (!tgt.has(best.ch)) tgt.set(best.ch, []);
     tgt.get(best.ch).push({ idx: best.idx, score: best.score });
@@ -427,7 +655,7 @@ if (process.argv.includes('--corners')) {
 }
 
 // ---------- 出關卡 ----------
-if (!TEST && !process.argv.some(a => a.startsWith("--"))) {
+if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from')) {
     const t0 = Date.now();
   const bases = HK.filter(c => { const n = nStrokes(c); return n >= 4 && n <= 17; });
   const results = [];
@@ -443,12 +671,20 @@ if (!TEST && !process.argv.some(a => a.startsWith("--"))) {
   // 每個筆畫數分配幾多關（少畫嘅先，慢慢加難）；同一筆畫數揀有趣答案多、小朋友早啲學嘅字
   const QUOTA = { 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 26, 10: 28, 11: 28, 12: 28, 13: 26, 14: 24, 15: 22, 16: 18, 17: 14 };
   const grade = c => +(U[c].kGradeLevel || 7);
+  // 舊版有嘅母字（玩家可能玩緊、有紀錄）仲合格就一定保留：--keep 舊levels.js（可以俾幾個）
+  const keepSet = new Set();
+  for (let a = 0; a < process.argv.length; a++) if (process.argv[a] === '--keep-from') {
+    const txt = fs.readFileSync(process.argv[a + 1], 'utf8');
+    const old = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
+    old.levels.forEach(l => keepSet.add(l.c));
+  }
   const chosen = [];
   for (const [n, q] of Object.entries(QUOTA)) {
-    const pool = results.filter(r => r.n === +n && (r.interesting / r.count >= 0.3 || r.interesting >= 4));
-    pool.forEach(r => { r.pick = Math.min(r.interesting, 10) + (grade(r.B) <= 3 ? 3 : grade(r.B) <= 6 ? 1.5 : 0); });
+    const pool = results.filter(r => r.n === +n && (r.interesting / r.count >= 0.3 || r.interesting >= 4 || keepSet.has(r.B)));
+    pool.forEach(r => { r.pick = Math.min(r.interesting, 10) + (grade(r.B) <= 3 ? 3 : grade(r.B) <= 6 ? 1.5 : 0) + (keepSet.has(r.B) ? 100 : 0); });
     pool.sort((x, y) => y.pick - x.pick);
-    chosen.push(...pool.slice(0, q));
+    const kept = pool.filter(r => keepSet.has(r.B)).length;
+    chosen.push(...pool.slice(0, Math.max(q, kept)));
   }
   // 難度：筆畫數 + 答案數
   chosen.forEach(r => { r.diff = r.n + 0.4 * Math.min(r.count, 24); });
@@ -462,7 +698,11 @@ if (!TEST && !process.argv.some(a => a.startsWith("--"))) {
     reads(B);
     // 答案排次序：筆畫少嘅先，母字自己最後
     const ans = [...res.answers.entries()].sort((a, b) => (a[0] === B) - (b[0] === B) || nStrokes(a[0]) - nStrokes(b[0]) || a[0].localeCompare(b[0]));
-    const answers = ans.slice(0, 24).map(([ch, subs]) => { reads(ch); return [ch, subs.sort((x, y) => x.score - y.score).slice(0, 150).map(x => mask(x.idx))]; });
+    // 多過 24 個：保留母字，其他按年級（低年級先）揀，再按筆畫排返
+    const g = c => +(U[c].kGradeLevel || 7);
+    const keep = ans.length <= 24 ? ans : [...ans.filter(a => a[0] !== B).sort((x, y) => g(x[0]) - g(y[0]) || nStrokes(x[0]) - nStrokes(y[0])).slice(0, 23), ...ans.filter(a => a[0] === B)]
+      .sort((a, b) => (a[0] === B) - (b[0] === B) || nStrokes(a[0]) - nStrokes(b[0]) || a[0].localeCompare(b[0]));
+    const answers = keep.map(([ch, subs]) => { reads(ch); return [ch, subs.sort((x, y) => x.score - y.score).slice(0, 150).map(x => mask(x.idx))]; });
     const decoys = [...res.decoys.entries()].map(([ch, subs]) => [ch, tradOf(ch), subs.sort((x, y) => x.score - y.score).slice(0, 30).map(x => mask(x.idx))]);
     return {
       c: B,
@@ -505,7 +745,7 @@ if (process.argv.includes('--review')) {
       if (ch === B) continue;
       subs.sort((a, b) => b.score - a.score);
       const w = subs[0];
-      html += `<div class="c${w.score > 0.15 ? ' bad' : ''}">${svgOf(B, w.idx)} ${full(ch)}<br>${ch} 最差 ${w.score.toFixed(3)} ×${subs.length}</div>`;
+      html += `<div class="c${w.score > 0.28 ? ' bad' : ''}">${svgOf(B, w.idx)} ${full(ch)}<br>${ch} 最差 ${w.score.toFixed(3)} ×${subs.length}</div>`;
     }
     for (const [ch, subs] of res.decoys) html += `<div class="c" style="background:#eef">${svgOf(B, subs[0].idx)} ${full(ch)}<br>簡 ${ch} ${subs[0].score.toFixed(3)}</div>`;
     html += '</div>';
@@ -523,4 +763,32 @@ if (process.argv.includes('--comp')) {
     const g = geomScore(idx.map(j => BF[j]), XF);
     console.log(c, idx.join(','), 'shape', sh, 'rel', cost.toFixed(2), '/', (relBudget(XF.length) * 1.5).toFixed(2), g ? `mean ${g.mean.toFixed(3)} worst ${g.worst.toFixed(3)} score ${(g.score + REL_W * cost).toFixed(3)}` : 'geom null', '→', checkMapping(BF, XF, RB, RX, idx));
   }
+}
+
+if (process.argv.includes('--types')) {
+  for (const ch of process.argv.slice(process.argv.indexOf('--types') + 1).join('')) {
+    if (!G.has(ch)) continue;
+    console.log(ch, types(ch).map(t => t.code + '(' + t.pieces.map(p => Math.round(p.a / DEG)).join('/') + ')').join(' '));
+  }
+}
+if (process.argv.includes('--why')) {
+  // node build_levels.mjs <dataDir> --why 友 大 0,1,3   → 逐條規則印出嚟
+  const i = process.argv.indexOf('--why'); const B = process.argv[i + 1], X = process.argv[i + 2];
+  const idx = process.argv[i + 3].split(',').map(Number);
+  const BF = feat(B), XF = feat(X), TB = types(B), TX = types(X), CB = crossMatrix(B), CX = crossMatrix(X);
+  XF.forEach((_, k) => console.log(`  第${k}筆 ${TX[k].code} ↔ ${B}第${idx[k]}筆 ${TB[idx[k]].code}`, typeCompat(TX[k], TB[idx[k]]) ? 'ok' : '類型唔同'));
+  const xb = bbox(XF), xs = Math.max(xb.w, xb.h, 1), bb = bbox(idx.map(j => BF[j])), bs = Math.max(bb.w, bb.h, 1);
+  for (let a = 0; a < XF.length; a++) for (let b = a + 1; b < XF.length; b++) {
+    const [sx, sy] = posSign(XF, a, b, xs), dx = (BF[idx[b]].cx - BF[idx[a]].cx) / bs, dy = (BF[idx[b]].cy - BF[idx[a]].cy) / bs;
+    const fx = q => q ? `${q.k}(${q.pa.toFixed(2)},${q.pb.toFixed(2)})` : '-';
+    const touchy = [CX[a][b].k, CB[idx[a]][idx[b]].k].some(k => k === 'T' || k === 'X');
+    console.log(`  ${a}-${b} 關係 ${fx(CX[a][b])}↔${fx(CB[idx[a]][idx[b]])} ${linkOk(CX[a][b], CB[idx[a]][idx[b]]) ? 'ok' : '✗'}${touchy ? '（掂住：唔比中心）' : ''}  左右 ${sx}↔${dx.toFixed(2)} ${posOk(sx, dx) ? 'ok' : '✗'}  上下 ${sy}↔${dy.toFixed(2)} ${posOk(sy, dy) ? 'ok' : '✗'}`);
+  }
+  console.log('  →', ruleCheck(B, X, idx));
+}
+if (process.argv.includes('--worst')) {
+  const i = process.argv.indexOf('--worst'); const B = process.argv[i + 1], X = process.argv[i + 2];
+  const res = solveBase(B), subs = (res.answers.get(X) || []).sort((a, b) => b.score - a.score);
+  for (const s of subs.slice(0, 2)) { console.log(B, '→', X, s.idx.join(','), s.score.toFixed(3)); process.argv[process.argv.indexOf('--worst')] = '--x'; }
+  const s = subs[0]; if (s) { const BF = feat(B); console.log('  types', s.idx.map(j => types(B)[j].code).join(' '), '| X', types(X).map(t => t.code).join(' ')); console.log('  links B', s.idx.map((a, p) => s.idx.slice(p + 1).map(b => crossMatrix(B)[a][b].k).join('')).join(' '), '| X', types(X).map((_, a) => types(X).map((__, b) => b > a ? crossMatrix(X)[a][b].k : '').join('')).join(' ')); }
 }
