@@ -205,7 +205,8 @@ function geomScore(bStrokes, xStrokes) {
 }
 
 // ================= 第三版：規則配對（Bill 2026-11-10 定） =================
-// 1. 每筆分類：橫 H、提 T、直 S、撇 P、點／捺 D（仲有少見嘅 U 向上、R 左上、W 向左）；有轉角就分段（例如 𠃌 = H,S）；收筆嘅鉤唔計
+// 1. 每筆分類：橫 H、提 T、直 S、撇 P、點／捺 D（仲有少見嘅 U 向上、R 左上、W 向左）；有轉角就分段（例如 𠃌 = H,S）；
+//    收筆鉤另外記：單筆嘅鉤要一樣（亅唔可以當丨）；有轉角嘅筆（𠃌／橫折鉤）唔分鉤
 // 2. 砌新字：每筆類型要一樣（撇唔可以當橫）
 // 3. 每兩筆：交叉、相接、分開要一樣（原本喺右邊唔可以變插穿；「下」個直要掂住個橫）；左右、上下位置要一樣
 // 4. 長度同距離唔理；幾隻字都合規則先用形狀分數揀最似嗰隻
@@ -264,8 +265,10 @@ function strokeType(raw) {
     }
     if (!changed) break;
   }
-  const pieces = [];
+  let pieces = [];
   for (let q = 0; q < bounds.length - 1; q++) { const a = chordAng(pts, bounds[q], bounds[q + 1]); pieces.push({ a, c: strokeClass(a) }); }
+  // 最尾一段向上或者向左（「了」「子」「手」嘅亅）都係鉤
+  if (!hook && pieces.length >= 2 && 'RUW'.includes(pieces.at(-1).c) && cum[end] - cum[bounds.at(-2)] < 0.35 * L) { pieces = pieces.slice(0, -1); hook = true; }
   return { hook, pieces, code: pieces.map(p => p.c).join('') + (hook ? '鉤' : '') };
 }
 const typeCache = new Map();
@@ -275,6 +278,9 @@ function types(ch) {
 }
 function typeCompat(a, b) {
   if (a.pieces.length !== b.pieces.length) return false;
+  // 單筆嘅鉤要一樣：直鉤（亅）唔可以當直（丨）（Bill 2026-11-10）；
+  // 橫折同橫折鉤唔分，因為楷書字款唔穩定（「目」嘅 𠃌 畫咗鉤，「口」「日」冇）
+  if (a.pieces.length === 1 && a.hook !== b.hook) return false;
   for (let i = 0; i < a.pieces.length; i++) {
     const p = a.pieces[i], q = b.pieces[i];
     // 同一類（橫、提、直、撇、點）先得；分界附近（例如斜少少嘅直同點）差 15° 以內通融
@@ -691,6 +697,11 @@ if (process.argv.includes('--corners')) {
 // ---------- 出關卡 ----------
 if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from')) {
     const t0 = Date.now();
+  const KEEP = new Set();
+  for (let a = 0; a < process.argv.length; a++) if (process.argv[a] === '--keep-from') {
+    const txt = fs.readFileSync(process.argv[a + 1], 'utf8');
+    JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1)).levels.forEach(l => KEEP.add(l.c));
+  }
   const bases = HK.filter(c => { const n = nStrokes(c); return n >= 4 && n <= 17; });
   const results = [];
   let done = 0;
@@ -699,19 +710,15 @@ if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from'))
     const ans = [...res.answers.keys()];
     const basic = new Set(['一', '二', '三', '十']);
     const interesting = ans.filter(c => !basic.has(c) && c !== B).length;
-    if (ans.length >= 5 && interesting >= 2) results.push({ B, res, n: nStrokes(B), count: ans.length, interesting });
+    // 新關要 5 隻字以上；舊版有嘅關（玩家可能有紀錄）3 隻字以上都保留
+    if ((ans.length >= 5 && interesting >= 2) || (KEEP.has(B) && ans.length >= 3)) results.push({ B, res, n: nStrokes(B), count: ans.length, interesting });
     if (++done % 200 === 0) console.error(`${done}/${bases.length} ${((Date.now() - t0) / 1000).toFixed(0)}s`);
   }
   // 每個筆畫數分配幾多關（少畫嘅先，慢慢加難）；同一筆畫數揀有趣答案多、小朋友早啲學嘅字
   const QUOTA = { 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 26, 10: 28, 11: 28, 12: 28, 13: 26, 14: 24, 15: 22, 16: 18, 17: 14 };
   const grade = c => +(U[c].kGradeLevel || 7);
-  // 舊版有嘅母字（玩家可能玩緊、有紀錄）仲合格就一定保留：--keep 舊levels.js（可以俾幾個）
-  const keepSet = new Set();
-  for (let a = 0; a < process.argv.length; a++) if (process.argv[a] === '--keep-from') {
-    const txt = fs.readFileSync(process.argv[a + 1], 'utf8');
-    const old = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
-    old.levels.forEach(l => keepSet.add(l.c));
-  }
+  // 舊版有嘅母字（玩家可能玩緊、有紀錄）仲合格就一定保留：--keep-from 舊levels.js（可以俾幾個）
+  const keepSet = KEEP;
   const chosen = [];
   for (const [n, q] of Object.entries(QUOTA)) {
     const pool = results.filter(r => r.n === +n && (r.interesting / r.count >= 0.3 || r.interesting >= 4 || keepSet.has(r.B)));
