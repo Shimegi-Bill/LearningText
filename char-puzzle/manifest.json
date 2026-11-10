@@ -1,0 +1,17 @@
+{
+  "name": "拆字小偵探",
+  "short_name": "拆字小偵探",
+  "description": "揀筆畫，砌出新嘅繁體字。由 Bill Chiu 開發。",
+  "lang": "zh-Hant-HK",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#e3f4ee",
+  "theme_color": "#e3f4ee",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

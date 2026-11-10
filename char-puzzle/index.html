@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="拆字小偵探">
+<meta name="theme-color" content="#e3f4ee">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<title>拆字小偵探</title>
+<script>
+// 版本號：上載前一定要改（levels.js 會跟住呢個版本號載入）
+window.__CP_VER='2026-11-10-1';
+</script>
+<style>
+:root{
+  --bg1:#e3f4ee; --bg2:#fff6e0;
+  --ink:#22313f; --ink2:#4b5d6e;
+  --stroke:#2f3e4e; --sel:#ff5a2c; --hint:#f2b705; --demo:#2f8cff;
+  --grid:#9ed5c5; --frame:#5fb39c; --card:#ffffff;
+  --good:#08875a; --bad:#cf1f35; --warn:#a85b00;
+  --app-h:100vh;
+  --zi:"Kaiti TC","STKaiti","BiauKai","TW-Kai","DFKai-SB","PingFang HK","PingFang TC","Noto Sans HK","Noto Sans TC","Microsoft JhengHei",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:var(--app-h);overflow:hidden;background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--ink);
+  font-family:-apple-system,"PingFang HK","Noto Sans HK","Microsoft JhengHei",sans-serif;-webkit-user-select:none;user-select:none;touch-action:manipulation}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-action:manipulation}
+#app{height:var(--app-h);max-width:520px;margin:0 auto;display:flex;flex-direction:column;
+  padding:calc(env(safe-area-inset-top) + 6px) 12px calc(env(safe-area-inset-bottom) + 4px)}
+.top{display:flex;align-items:center;gap:8px;flex:none}
+.iconbtn{width:46px;height:46px;border-radius:16px;background:#fff;box-shadow:0 3px 0 #c9e3da;font-size:24px;display:grid;place-items:center}
+.iconbtn:active{transform:translateY(2px);box-shadow:0 1px 0 #c9e3da}
+.ttl{flex:1;text-align:center;line-height:1.2}
+#lvTitle{font-size:24px;font-weight:800;letter-spacing:1px}
+#lvSub{font-size:15px;color:var(--ink2);margin-top:2px}
+#lvSub b{color:var(--sel);font-size:17px}
+#lvSub b.f{color:var(--good)}
+.grid{flex:none;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 5px;margin:8px 0 2px;min-height:40px}
+.cell{display:flex;flex-direction:column;align-items:center;width:var(--bs)}
+.rd{height:15px;font-size:12px;line-height:15px;color:var(--ink2);font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;white-space:nowrap}
+.box{width:var(--bs);height:var(--bs);border:2px solid var(--frame);border-radius:6px;background:#fff;position:relative;
+  display:grid;place-items:center;font-family:var(--zi);font-size:calc(var(--bs) * .72);line-height:1;color:var(--ink)}
+.box::before,.box::after{content:"";position:absolute;pointer-events:none;border-color:var(--grid);border-style:dashed;border-width:0}
+.box::before{left:50%;top:2px;bottom:2px;border-left-width:1px}
+.box::after{top:50%;left:2px;right:2px;border-top-width:1px}
+.box span{position:relative;z-index:1}
+.box.got{background:#fffbe9;border-color:#e8a93a}
+.box.pulse{animation:pulse .6s ease 2}
+.box.hinted{border-color:var(--hint);box-shadow:0 0 0 3px #ffe38a}
+@keyframes pulse{50%{transform:scale(1.2)}}
+.mid{flex:none;display:flex;align-items:center;justify-content:center;gap:12px;height:72px;margin:2px 0}
+.pbox{width:64px;height:64px;border:2px dashed var(--frame);border-radius:10px;background:#fff;flex:none;display:grid;place-items:center}
+.pbox svg{width:56px;height:56px}
+.pbox.shake{animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+.msg{flex:1;max-width:300px;font-size:18px;font-weight:700;line-height:1.3;min-height:24px;color:var(--ink2)}
+.msg.good{color:var(--good)} .msg.bad{color:var(--bad)} .msg.warn{color:var(--warn)}
+.msg .big{font-family:var(--zi);font-size:26px}
+.board{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative}
+#big{background:#fff;border:3px solid var(--frame);border-radius:18px;box-shadow:0 5px 0 #bfe0d5;touch-action:none;display:block}
+#big .guide{stroke:var(--grid);stroke-width:4;stroke-dasharray:18 14;fill:none}
+#big .stk{fill:var(--stroke);stroke:#fff;stroke-width:16;paint-order:stroke;stroke-linejoin:round;transition:fill .12s}
+#big .stk.on{fill:var(--sel)}
+#big .stk.demo{fill:var(--demo)}
+#big .stk.hint{animation:hintblink .5s ease-in-out 4}
+@keyframes hintblink{50%{fill:var(--hint)}}
+#hand{position:absolute;left:0;top:0;font-size:44px;pointer-events:none;opacity:0;z-index:5;filter:drop-shadow(0 3px 3px rgba(0,0,0,.25))}
+.btns{flex:none;display:flex;justify-content:space-between;align-items:flex-end;gap:4px;padding:8px 2px 2px}
+.btns button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:14px;font-weight:700;color:var(--ink);flex:1;min-width:0}
+.btns button span{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;font-size:26px;box-shadow:0 4px 0 rgba(0,0,0,.14)}
+.btns button:active span{transform:translateY(3px);box-shadow:0 1px 0 rgba(0,0,0,.14)}
+#bSkip span{background:#d9ccf5} #bHint span{background:#ffe08a} #bClear span{background:#e1e8ec} #bAll span{background:#bfe0ff}
+#bOk span{background:#34d399;width:64px;height:64px;font-size:32px}
+#bOk{font-size:16px}
+.credit{flex:none;text-align:center;font-size:11px;color:#6b7c8a;padding-top:2px}
+/* 彈出畫面 */
+.ov{position:fixed;inset:0;background:rgba(20,40,40,.45);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
+.ov.show{display:flex}
+.card{background:var(--card);border-radius:22px;width:100%;max-width:440px;max-height:calc(var(--app-h) - 40px);overflow:auto;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+.card h2{margin:0 0 10px;font-size:22px;text-align:center}
+.card .row{display:flex;gap:10px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.pill{padding:12px 22px;border-radius:999px;font-size:18px;font-weight:800;background:#34d399;color:#06301f;box-shadow:0 4px 0 #1fa877}
+.pill.grey{background:#e1e8ec;color:var(--ink);box-shadow:0 4px 0 #b9c4ca}
+.pill.red{background:#ffd3d8;color:#8a0f1f;box-shadow:0 4px 0 #f0a3ad}
+.pill:active{transform:translateY(3px);box-shadow:none}
+.win .emo{font-size:56px;text-align:center;line-height:1.1}
+.stars{text-align:center;font-size:34px;letter-spacing:4px;margin:4px 0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.chip{display:flex;flex-direction:column;align-items:center;background:#fffbe9;border:2px solid #e8a93a;border-radius:10px;padding:2px 6px;min-width:46px}
+.chip .c{font-family:var(--zi);font-size:30px;line-height:1.15}
+.chip .r{font-size:11px;color:var(--ink2)}
+.rec-sum{text-align:center;font-size:16px;color:var(--ink2);margin-bottom:10px}
+.rec-sum b{color:var(--sel);font-size:20px}
+.lvrow{display:flex;align-items:center;gap:10px;padding:8px;border-radius:14px;background:#f4faf8;margin-bottom:8px;width:100%;text-align:left}
+.lvrow .n{font-size:13px;color:var(--ink2);width:58px;flex:none;white-space:nowrap}
+.lvrow .b{font-family:var(--zi);font-size:34px;width:44px;text-align:center;flex:none}
+.lvrow .info{flex:1;min-width:0}
+.lvrow .st{font-size:13px;font-weight:700}
+.lvrow .fs{font-family:var(--zi);font-size:19px;letter-spacing:2px;color:var(--ink);word-break:break-all}
+.lvrow.cur{outline:3px solid var(--sel)}
+.tabs{display:flex;gap:6px;justify-content:center;margin-bottom:10px}
+.tabs button{padding:8px 14px;border-radius:999px;background:#e9f2ef;font-weight:700}
+.tabs button.on{background:var(--frame);color:#fff}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid #eef2f2;font-size:17px;font-weight:700}
+.seg{display:flex;background:#e9f2ef;border-radius:999px;padding:3px}
+.seg button{padding:7px 12px;border-radius:999px;font-size:15px;font-weight:700}
+.seg button.on{background:var(--frame);color:#fff}
+.about{font-size:12px;color:#5d6d7a;line-height:1.6;margin-top:12px}
+.confetti{position:fixed;top:-40px;font-size:28px;z-index:30;pointer-events:none;animation:fall linear forwards}
+@keyframes fall{to{transform:translateY(calc(var(--app-h) + 80px)) rotate(540deg)}}
+.fly{position:fixed;z-index:25;font-family:var(--zi);color:var(--sel);pointer-events:none;line-height:1;text-shadow:0 0 6px #fff,0 0 10px #fff}
+@media (max-width:360px){
+  .btns button{font-size:12px}
+  .btns button span{width:44px;height:44px;font-size:22px}
+  #bOk span{width:54px;height:54px;font-size:27px}
+}
+@media (max-height:700px){
+  #lvTitle{font-size:20px} #lvSub{font-size:13px}
+  .iconbtn{width:40px;height:40px;font-size:20px;border-radius:13px}
+  .grid{margin:4px 0 0;gap:2px 4px}
+  .rd{height:13px;font-size:11px;line-height:13px}
+  .mid{height:56px;margin:0}
+  .pbox{width:50px;height:50px} .pbox svg{width:44px;height:44px}
+  .msg{font-size:15px} .msg .big{font-size:21px}
+  .btns{padding-top:4px}
+  .btns button span{width:46px;height:46px;font-size:23px}
+  #bOk span{width:56px;height:56px;font-size:28px}
+}
+#loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:20px;font-weight:700;background:linear-gradient(180deg,var(--bg1),var(--bg2));z-index:40}
+#loading .z{font-family:var(--zi);font-size:80px;animation:pulse 1.2s infinite}
+</style>
+</head>
+<body>
+<div id="loading"><div class="z">字</div><div>載入中…</div></div>
+<div id="app">
+  <header class="top">
+    <button id="btnSet" class="iconbtn" aria-label="設定">⚙️</button>
+    <div class="ttl">
+      <div id="lvTitle">第 1 關</div>
+      <div id="lvSub">搵出 <b id="nTotal">0</b> 隻字　已搵到 <b id="nFound" class="f">0</b></div>
+    </div>
+    <button id="btnRec" class="iconbtn" aria-label="紀錄">📖</button>
+  </header>
+  <section id="grid" class="grid"></section>
+  <section class="mid">
+    <div id="preview" class="pbox"><svg id="pv" viewBox="0 0 1024 1024"></svg></div>
+    <div id="msg" class="msg">揀筆畫，砌出新嘅字！</div>
+  </section>
+  <section id="board" class="board">
+    <svg id="big" viewBox="0 0 1024 1024">
+      <path class="guide" d="M512 20V1004M20 512H1004"/>
+      <g id="strokes" transform="scale(1,-1) translate(0,-900)"></g>
+    </svg>
+    <div id="hand">👆</div>
+  </section>
+  <nav class="btns">
+    <button id="bSkip"><span>⏭️</span>跳關</button>
+    <button id="bHint"><span>💡</span>提示</button>
+    <button id="bClear"><span>🧹</span>清除</button>
+    <button id="bAll"><span>✋</span>全選</button>
+    <button id="bOk"><span>✅</span>確定</button>
+  </nav>
+  <footer class="credit">拆字小偵探 · 由 Bill Chiu 開發</footer>
+</div>
+
+<!-- 過關 -->
+<div id="ovWin" class="ov"><div class="card win">
+  <div class="emo">🎉</div>
+  <h2 id="winTitle">過關！</h2>
+  <div id="winStars" class="stars"></div>
+  <div id="winChips" class="chips"></div>
+  <div class="row"><button id="winNext" class="pill">下一關 ▶</button></div>
+</div></div>
+
+<!-- 紀錄 -->
+<div id="ovRec" class="ov"><div class="card">
+  <h2>📖 我嘅紀錄</h2>
+  <div id="recSum" class="rec-sum"></div>
+  <div class="tabs"><button id="tabLv" class="on">關卡</button><button id="tabZi">我識嘅字</button></div>
+  <div id="recBody"></div>
+  <div class="row"><button class="pill grey" data-close>關閉</button></div>
+</div></div>
+
+<!-- 設定 -->
+<div id="ovSet" class="ov"><div class="card">
+  <h2>⚙️ 設定</h2>
+  <div class="set-row">讀音<div class="seg" id="segRead"><button data-v="jp">粵拼</button><button data-v="py">拼音</button><button data-v="none">唔顯示</button></div></div>
+  <div class="set-row">讀出聲（廣東話）<div class="seg" id="segVoice"><button data-v="1">開</button><button data-v="0">關</button></div></div>
+  <div class="set-row">音效<div class="seg" id="segSfx"><button data-v="1">開</button><button data-v="0">關</button></div></div>
+  <div class="row"><button id="btnReset" class="pill red">由第 1 關重新開始</button></div>
+  <div class="about">
+    拆字小偵探 · 由 Bill Chiu 開發<br>
+    玩法：撳或者掃大字嘅筆畫，揀好之後撳「確定」，砌出新嘅字。搵晒上面所有格仔就過關。<br>
+    只收香港常用繁體字（《常用字字形表》），簡體字唔計。<br>
+    筆畫：Make Me a Hanzi（Arphic Public License）；字表同讀音：Unicode Unihan。<br>
+    版本 <span id="verTxt"></span>
+  </div>
+  <div class="row"><button class="pill grey" data-close>關閉</button></div>
+</div></div>
+
+<!-- 確認 -->
+<div id="ovAsk" class="ov"><div class="card">
+  <h2 id="askTitle"></h2>
+  <div id="askText" style="text-align:center;font-size:16px;color:var(--ink2)"></div>
+  <div class="row"><button id="askNo" class="pill grey">唔好</button><button id="askYes" class="pill">好</button></div>
+</div></div>
+
+<script>
+(function(){
+'use strict';
+const VER = window.__CP_VER;
+const KEY = 'chaizi-v1';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+// ---------- 畫面高度（iPhone 主畫面 App） ----------
+function setAppH(){
+  document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+  [60, 250, 600, 1200].forEach(t => setTimeout(() => window.scrollTo(0, 0), t));
+}
+setAppH();
+addEventListener('resize', () => { setAppH(); layout(); });
+addEventListener('orientationchange', () => setTimeout(() => { setAppH(); layout(); }, 300));
+
+// ---------- 存檔 ----------
+let S = { v: 1, cur: null, max: 0, lv: {}, set: { read: 'jp', voice: true, sfx: true }, tut: false };
+try { const t = JSON.parse(localStorage.getItem(KEY) || 'null'); if (t && t.v === 1) S = Object.assign(S, t, { set: Object.assign(S.set, t.set || {}) }); } catch (e) {}
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
+
+// ---------- 數據 ----------
+let LV = [], RD = {}, li = 0, L = null, rec = null;
+const sel = new Set();
+let hintTarget = null, hintStage = 0;
+
+function loadData(){
+  const s = document.createElement('script');
+  s.src = 'levels.js?v=' + encodeURIComponent(VER);
+  s.onload = () => { LV = window.LEVELS.levels; RD = window.LEVELS.readings; start(); };
+  s.onerror = () => { $('loading').innerHTML = '<div>載入唔到，請檢查網絡再開過 🙏</div>'; };
+  document.head.appendChild(s);
+}
+
+function levelIndexOf(ch){ const i = LV.findIndex(l => l.c === ch); return i < 0 ? 0 : i; }
+function recOf(ch){ if (!S.lv[ch]) S.lv[ch] = { f: [], h: 0, done: false, skip: false }; return S.lv[ch]; }
+
+function start(){
+  li = S.cur ? levelIndexOf(S.cur) : 0;
+  $('verTxt').textContent = VER;
+  $('loading').style.display = 'none';
+  openLevel(li);
+  checkUpdate();
+}
+
+// ---------- 關卡 ----------
+function openLevel(i){
+  li = Math.max(0, Math.min(LV.length - 1, i));
+  L = LV[li];
+  S.cur = L.c; S.max = Math.max(S.max || 0, li);
+  rec = recOf(L.c);
+  rec.f = rec.f.filter(ch => L.a.some(a => a[0] === ch));
+  save();
+  sel.clear(); hintTarget = null; hintStage = 0;
+  $('lvTitle').textContent = '第 ' + (li + 1) + ' 關';
+  renderStrokes(); renderGrid(); renderPreview(); updateCount();
+  say(rec.f.length ? '繼續搵！仲有 ' + (L.a.length - rec.f.length) + ' 隻' : '揀筆畫，砌出新嘅字！');
+  layout();
+  stopDemo();
+  if (li === 0 && !S.tut && rec.f.length === 0) setTimeout(startDemo, 900);
+}
+
+function renderStrokes(){
+  const g = $('strokes'); g.innerHTML = '';
+  L.s.forEach((d, i) => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d); p.setAttribute('class', 'stk'); p.dataset.i = i;
+    g.appendChild(p);
+  });
+}
+function paintSel(){
+  $('strokes').querySelectorAll('.stk').forEach(p => p.classList.toggle('on', sel.has(+p.dataset.i)));
+  renderPreview();
+}
+function readingOf(ch){
+  const r = RD[ch] || ['', ''];
+  return S.set.read === 'jp' ? r[0] : S.set.read === 'py' ? r[1] : '';
+}
+function renderGrid(){
+  const grid = $('grid'); grid.innerHTML = '';
+  L.a.forEach((a, k) => {
+    const cell = document.createElement('div'); cell.className = 'cell';
+    const ch = rec.f[k];
+    cell.innerHTML = '<div class="rd">' + (ch ? readingOf(ch) : '') + '</div><div class="box' + (ch ? ' got' : '') + '"><span>' + (ch || '') + '</span></div>';
+    if (ch) cell.querySelector('.box').onclick = () => speak(ch);
+    grid.appendChild(cell);
+  });
+}
+function updateCount(){
+  $('nTotal').textContent = L.a.length;
+  $('nFound').textContent = rec.f.length;
+}
+function renderPreview(){
+  const pv = $('pv'); pv.innerHTML = '';
+  if (!sel.size) return;
+  // 用中線計外框（快），再加闊少少
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  sel.forEach(i => L.m[i].forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }));
+  const pad = 70, w = x1 - x0 + 2 * pad, h = y1 - y0 + 2 * pad, size = Math.max(w, h, 260);
+  const cx = (x0 + x1) / 2, cy = 900 - (y0 + y1) / 2;
+  pv.setAttribute('viewBox', (cx - size / 2) + ' ' + (cy - size / 2) + ' ' + size + ' ' + size);
+  const g = document.createElementNS(NS, 'g'); g.setAttribute('transform', 'scale(1,-1) translate(0,-900)');
+  [...sel].sort((a, b) => a - b).forEach(i => { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', L.s[i]); p.setAttribute('fill', '#ff5a2c'); g.appendChild(p); });
+  pv.appendChild(g);
+}
+
+// ---------- 排版 ----------
+function layout(){
+  if (!L) return;
+  const app = $('app'), W = Math.min(innerWidth, 520) - 24;
+  const n = L.a.length, perRow = Math.min(8, Math.max(5, Math.ceil(n / Math.ceil(n / 8))));
+  const rows = Math.ceil(n / perRow);
+  // 細 mon（例如 iPhone SE）答案多就縮細格仔，留位俾大字
+  const cap = innerHeight < 700 && rows >= 3 ? 34 : innerHeight < 760 && rows >= 3 ? 40 : 48;
+  const bs = Math.max(28, Math.min(cap, Math.floor((W - (perRow - 1) * 5) / perRow)));
+  app.style.setProperty('--bs', bs + 'px');
+  const board = $('board'), big = $('big');
+  big.style.width = big.style.height = '10px';
+  const r = board.getBoundingClientRect();
+  const size = Math.max(160, Math.floor(Math.min(r.width, r.height - 8)));
+  big.style.width = big.style.height = size + 'px';
+}
+
+// ---------- 揀筆畫 ----------
+function ptToChar(e){
+  const r = $('big').getBoundingClientRect();
+  return [(e.clientX - r.left) / r.width * 1024, 900 - (e.clientY - r.top) / r.height * 1024];
+}
+function segDist(p, a, b){
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+function strokeAt(p){
+  let best = -1, bd = 85;
+  L.m.forEach((m, i) => {
+    let d = m.length === 1 ? Math.hypot(p[0] - m[0][0], p[1] - m[0][1]) : Infinity;
+    for (let k = 1; k < m.length; k++) d = Math.min(d, segDist(p, m[k - 1], m[k]));
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+let drag = null;
+const big = $('big');
+big.addEventListener('pointerdown', e => {
+  e.preventDefault(); unlockAudio(); stopDemo(true);
+  const i = strokeAt(ptToChar(e));
+  if (i < 0) return;
+  drag = { add: !sel.has(i), last: i, id: e.pointerId };
+  try { big.setPointerCapture(e.pointerId); } catch (_) {}
+  toggle(i, drag.add);
+});
+big.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const i = strokeAt(ptToChar(e));
+  if (i >= 0 && i !== drag.last) { drag.last = i; toggle(i, drag.add); }
+});
+const endDrag = () => { drag = null; };
+big.addEventListener('pointerup', endDrag); big.addEventListener('pointercancel', endDrag);
+function toggle(i, on){
+  if (on === sel.has(i)) return;
+  on ? sel.add(i) : sel.delete(i);
+  sfx(on ? 'tick' : 'untick');
+  paintSel();
+}
+
+// ---------- 掣 ----------
+$('bOk').onclick = () => { unlockAudio(); stopDemo(true); submit(); };
+$('bClear').onclick = () => { unlockAudio(); stopDemo(true); sel.clear(); paintSel(); say('揀筆畫，砌出新嘅字！'); };
+$('bAll').onclick = () => { unlockAudio(); stopDemo(true); L.s.forEach((_, i) => sel.add(i)); paintSel(); sfx('tick'); };
+$('bHint').onclick = () => { unlockAudio(); stopDemo(true); hint(); };
+$('bSkip').onclick = () => {
+  unlockAudio(); stopDemo(true);
+  if (li >= LV.length - 1) { say('已經係最後一關喇！', 'warn'); return; }
+  ask('跳去下一關？', '呢關會記低做「未完成」，之後喺 📖 紀錄可以返嚟再玩。', () => { if (!rec.done) rec.skip = true; save(); openLevel(li + 1); });
+};
+
+function maskOf(set){ let m = 0; set.forEach(i => { m += 2 ** i; }); return m; }
+function popcount(m){ let c = 0; while (m) { c += m % 2; m = Math.floor(m / 2); } return c; }
+
+function submit(){
+  if (!sel.size) { say('先揀筆畫 👆', 'warn'); return; }
+  const m = maskOf(sel);
+  const ans = L.a.find(a => a[1].includes(m));
+  if (ans) {
+    const ch = ans[0];
+    if (rec.f.includes(ch)) {
+      say('「<span class="big">' + ch + '</span>」已經搵到喇', 'warn');
+      const k = rec.f.indexOf(ch); const box = $('grid').children[k].querySelector('.box');
+      box.classList.remove('pulse'); void box.offsetWidth; box.classList.add('pulse');
+      sfx('dup'); speak(ch);
+      return;
+    }
+    rec.f.push(ch);
+    if (hintTarget === ch) { hintTarget = null; hintStage = 0; }
+    if (li === 0) S.tut = true;
+    save();
+    const k = rec.f.length - 1;
+    flyTo(ch, k);
+    sel.clear(); paintSel();
+    say('啱晒！「<span class="big">' + ch + '</span>」' + (readingOf(ch) ? '（' + readingOf(ch) + '）' : '') + ' 👍', 'good');
+    sfx('good'); speak(ch);
+    updateCount();
+    if (rec.f.length === L.a.length) setTimeout(levelDone, 900);
+    return;
+  }
+  const dec = L.d.find(d => d[2].includes(m));
+  if (dec) {
+    say('「<span class="big">' + dec[0] + '</span>」係簡體字 🙅 繁體係「<span class="big">' + dec[1] + '</span>」', 'bad');
+    sfx('bad'); shake();
+    return;
+  }
+  say('唔係字喎，再試下 🤔', 'bad');
+  sfx('bad'); shake();
+}
+function shake(){ const p = $('preview'); p.classList.remove('shake'); void p.offsetWidth; p.classList.add('shake'); }
+
+function flyTo(ch, k){
+  const cell = $('grid').children[k];
+  const box = cell.querySelector('.box');
+  const from = $('preview').getBoundingClientRect(), to = box.getBoundingClientRect();
+  const f = document.createElement('div'); f.className = 'fly'; f.textContent = ch;
+  const fs = 56; f.style.fontSize = fs + 'px';
+  f.style.left = (from.left + from.width / 2 - fs / 2) + 'px'; f.style.top = (from.top + from.height / 2 - fs / 2) + 'px';
+  document.body.appendChild(f);
+  const dx = to.left + to.width / 2 - (from.left + from.width / 2), dy = to.top + to.height / 2 - (from.top + from.height / 2);
+  const sc = to.width / fs * 0.8;
+  const done = () => {
+    f.remove();
+    box.classList.add('got'); box.querySelector('span').textContent = ch;
+    cell.querySelector('.rd').textContent = readingOf(ch);
+    box.onclick = () => speak(ch);
+    box.classList.remove('pulse'); void box.offsetWidth; box.classList.add('pulse');
+  };
+  if (f.animate) {
+    const a = f.animate([{ transform: 'translate(0,0) scale(1.2)' }, { transform: 'translate(' + dx * 0.5 + 'px,' + (dy * 0.5 - 40) + 'px) scale(1.4)', offset: 0.45 }, { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + sc + ')' }], { duration: 650, easing: 'ease-in-out' });
+    a.onfinish = done;
+  } else done();
+}
+
+function levelDone(){
+  rec.done = true; rec.skip = false; rec.t = Date.now();
+  save();
+  const stars = rec.h === 0 ? 3 : rec.h <= 3 ? 2 : 1;
+  rec.stars = Math.max(rec.stars || 0, stars); save();
+  $('winTitle').textContent = '第 ' + (li + 1) + ' 關完成！「' + L.c + '」';
+  $('winStars').textContent = '⭐'.repeat(stars) + '☆'.repeat(3 - stars);
+  $('winChips').innerHTML = '';
+  rec.f.forEach(ch => {
+    const c = document.createElement('button'); c.className = 'chip';
+    c.innerHTML = '<span class="c">' + ch + '</span><span class="r">' + (readingOf(ch) || '&nbsp;') + '</span>';
+    c.onclick = () => speak(ch);
+    $('winChips').appendChild(c);
+  });
+  $('winNext').textContent = li < LV.length - 1 ? '下一關 ▶' : '全部完成！🏆';
+  show('ovWin');
+  sfx('win'); confetti();
+}
+$('winNext').onclick = () => { hide('ovWin'); if (li < LV.length - 1) openLevel(li + 1); };
+
+function hint(){
+  const left = L.a.filter(a => !rec.f.includes(a[0]));
+  if (!left.length) return;
+  if (!hintTarget || rec.f.includes(hintTarget)) { hintTarget = left[0][0]; hintStage = 0; }
+  const a = L.a.find(x => x[0] === hintTarget);
+  hintStage++;
+  rec.h = (rec.h || 0) + 1; save();
+  const n = popcount(a[1][0]);
+  const k = rec.f.length; // 下一格
+  const box = $('grid').children[k] && $('grid').children[k].querySelector('.box');
+  if (hintStage === 1) {
+    const r = readingOf(hintTarget);
+    say('💡 搵一隻 ' + n + ' 筆嘅字' + (r ? '，讀「' + r + '」' : ''), 'warn');
+    if (box) { box.classList.add('hinted'); setTimeout(() => box.classList.remove('hinted'), 2500); }
+    speak(hintTarget);
+  } else {
+    say('💡 睇下閃緊嗰 ' + n + ' 筆', 'warn');
+    const ps = $('strokes').querySelectorAll('.stk');
+    ps.forEach(p => p.classList.remove('hint'));
+    void $('strokes').getBoundingClientRect();
+    for (let i = 0; i < L.s.length; i++) if (Math.floor(a[1][0] / 2 ** i) % 2) ps[i].classList.add('hint');
+    setTimeout(() => ps.forEach(p => p.classList.remove('hint')), 2100);
+    speak(hintTarget);
+  }
+}
+
+// ---------- 訊息 ----------
+function say(html, cls){ const m = $('msg'); m.innerHTML = html; m.className = 'msg' + (cls ? ' ' + cls : ''); }
+
+// ---------- 彈出畫面 ----------
+function show(id){ $(id).classList.add('show'); }
+function hide(id){ $(id).classList.remove('show'); }
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('.ov').classList.remove('show'));
+let askCb = null;
+function ask(title, text, yes){ $('askTitle').textContent = title; $('askText').textContent = text; askCb = yes; show('ovAsk'); }
+$('askNo').onclick = () => hide('ovAsk');
+$('askYes').onclick = () => { hide('ovAsk'); if (askCb) askCb(); };
+
+// 紀錄
+let recTab = 'lv';
+$('btnRec').onclick = () => { unlockAudio(); stopDemo(true); renderRec(); show('ovRec'); };
+$('tabLv').onclick = () => { recTab = 'lv'; renderRec(); };
+$('tabZi').onclick = () => { recTab = 'zi'; renderRec(); };
+function renderRec(){
+  $('tabLv').classList.toggle('on', recTab === 'lv'); $('tabZi').classList.toggle('on', recTab === 'zi');
+  const done = LV.filter(l => S.lv[l.c] && S.lv[l.c].done).length;
+  const zi = new Set(); Object.values(S.lv).forEach(r => r.f.forEach(c => zi.add(c)));
+  $('recSum').innerHTML = '完成 <b>' + done + '</b> / ' + LV.length + ' 關　識 <b>' + zi.size + '</b> 隻字';
+  const body = $('recBody'); body.innerHTML = '';
+  if (recTab === 'zi') {
+    const wrap = document.createElement('div'); wrap.className = 'chips';
+    if (!zi.size) wrap.textContent = '未有，快啲去搵字啦！';
+    [...zi].forEach(ch => { const c = document.createElement('button'); c.className = 'chip'; c.innerHTML = '<span class="c">' + ch + '</span><span class="r">' + (readingOf(ch) || '&nbsp;') + '</span>'; c.onclick = () => speak(ch); wrap.appendChild(c); });
+    body.appendChild(wrap);
+    return;
+  }
+  const top = Math.min(LV.length - 1, S.max || 0);
+  for (let i = top; i >= 0; i--) {
+    const l = LV[i], r = S.lv[l.c];
+    const row = document.createElement('button'); row.className = 'lvrow' + (i === li ? ' cur' : '');
+    let st, col;
+    if (r && r.done) { st = '⭐'.repeat(r.stars || 1) + ' 完成'; col = 'var(--good)'; }
+    else if (r && r.skip) { st = '跳過 · ' + r.f.length + '/' + l.a.length; col = 'var(--warn)'; }
+    else { st = (r ? r.f.length : 0) + '/' + l.a.length + ' 玩緊'; col = 'var(--ink2)'; }
+    row.innerHTML = '<span class="n">第' + (i + 1) + '關</span><span class="b">' + l.c + '</span><span class="info"><div class="st" style="color:' + col + '">' + st + '</div><div class="fs">' + (r ? r.f.join('') : '') + '</div></span>';
+    row.onclick = () => { hide('ovRec'); openLevel(i); };
+    body.appendChild(row);
+  }
+}
+
+// 設定
+$('btnSet').onclick = () => { unlockAudio(); stopDemo(true); renderSet(); show('ovSet'); };
+function renderSet(){
+  document.querySelectorAll('#segRead button').forEach(b => b.classList.toggle('on', b.dataset.v === S.set.read));
+  document.querySelectorAll('#segVoice button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!S.set.voice));
+  document.querySelectorAll('#segSfx button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!S.set.sfx));
+}
+document.querySelectorAll('#segRead button').forEach(b => b.onclick = () => { S.set.read = b.dataset.v; save(); renderSet(); renderGrid(); });
+document.querySelectorAll('#segVoice button').forEach(b => b.onclick = () => { S.set.voice = b.dataset.v === '1'; save(); renderSet(); if (S.set.voice) speak('好'); });
+document.querySelectorAll('#segSfx button').forEach(b => b.onclick = () => { S.set.sfx = b.dataset.v === '1'; save(); renderSet(); sfx('good'); });
+$('btnReset').onclick = () => ask('由第 1 關重新開始？', '所有紀錄會清除，唔可以返轉頭。', () => {
+  S.cur = null; S.max = 0; S.lv = {}; S.tut = false; save(); hide('ovSet'); openLevel(0);
+});
+
+// ---------- 聲音 ----------
+let AC = null, voices = [];
+function unlockAudio(){
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    if ('speechSynthesis' in window) { try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch (e) {} }
+  }
+  if (AC && AC.state === 'suspended') AC.resume();
+}
+function loadVoices(){ try { voices = speechSynthesis.getVoices() || []; } catch (e) {} }
+if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function speak(ch){
+  if (!S.set.voice || !('speechSynthesis' in window) || !ch) return;
+  try {
+    const u = new SpeechSynthesisUtterance(ch);
+    const v = voices.find(v => /zh[-_]HK|yue/i.test(v.lang)) || voices.find(v => /zh[-_](TW|Hant)/i.test(v.lang));
+    u.lang = v ? v.lang : 'zh-HK'; if (v) u.voice = v;
+    u.rate = 0.8;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  } catch (e) {}
+}
+function tone(f, t0, dur, type, vol){
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type || 'sine'; o.frequency.value = f;
+  g.gain.setValueAtTime(0.0001, AC.currentTime + t0);
+  g.gain.exponentialRampToValueAtTime(vol || 0.2, AC.currentTime + t0 + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + t0 + dur);
+  o.connect(g); g.connect(AC.destination); o.start(AC.currentTime + t0); o.stop(AC.currentTime + t0 + dur + 0.05);
+}
+function sfx(kind){
+  if (!S.set.sfx || !AC) return;
+  try {
+    if (kind === 'tick') tone(880, 0, 0.06, 'triangle', 0.12);
+    else if (kind === 'untick') tone(520, 0, 0.06, 'triangle', 0.1);
+    else if (kind === 'good') { tone(784, 0, 0.18); tone(1047, 0.1, 0.3); }
+    else if (kind === 'dup') { tone(660, 0, 0.15); tone(660, 0.12, 0.15); }
+    else if (kind === 'bad') { tone(220, 0, 0.22, 'square', 0.08); tone(180, 0.12, 0.25, 'square', 0.08); }
+    else if (kind === 'win') [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, i * 0.11, 0.35, 'triangle', 0.18));
+  } catch (e) {}
+}
+function confetti(){
+  const em = ['🎉', '⭐', '🎈', '✨', '🌟', '🎊'];
+  for (let i = 0; i < 26; i++) {
+    const c = document.createElement('div'); c.className = 'confetti'; c.textContent = em[i % em.length];
+    c.style.left = (Math.random() * 100) + 'vw'; c.style.animationDuration = (1.8 + Math.random() * 1.6) + 's'; c.style.animationDelay = (Math.random() * 0.6) + 's';
+    document.body.appendChild(c); setTimeout(() => c.remove(), 4200);
+  }
+}
+
+// ---------- 第一關示範：隻手示範揀筆畫再撳確定（唔用文字） ----------
+let demo = null;
+function startDemo(){
+  if (demo || li !== 0 || S.tut || rec.f.length) return;
+  // 揀一隻 2–3 筆嘅答案嚟示範
+  const a = L.a.find(x => popcount(x[1][0]) >= 2 && popcount(x[1][0]) <= 3 && x[0] !== L.c) || L.a[0];
+  const idx = []; for (let i = 0; i < L.s.length; i++) if (Math.floor(a[1][0] / 2 ** i) % 2) idx.push(i);
+  demo = { stop: false, timers: [] };
+  const hand = $('hand');
+  const run = () => {
+    if (!demo || demo.stop) return;
+    const br = $('board').getBoundingClientRect(), r = big.getBoundingClientRect();
+    const pts = idx.map(i => { const m = L.m[i], p = m[Math.floor(m.length / 2)]; return [r.left - br.left + p[0] / 1024 * r.width, r.top - br.top + (900 - p[1]) / 1024 * r.height]; });
+    const ok = $('bOk').querySelector('span').getBoundingClientRect();
+    pts.push([ok.left - br.left + ok.width / 2, ok.top - br.top + ok.height / 2]);
+    let t = 0;
+    hand.style.opacity = 1;
+    pts.forEach((p, k) => {
+      demo.timers.push(setTimeout(() => {
+        if (!demo || demo.stop) return;
+        hand.style.transition = 'transform .55s ease';
+        hand.style.transform = 'translate(' + (p[0] - 14) + 'px,' + (p[1] - 4) + 'px)';
+      }, t));
+      demo.timers.push(setTimeout(() => {
+        if (!demo || demo.stop) return;
+        hand.animate && hand.animate([{ scale: '1' }, { scale: '0.8' }, { scale: '1' }], { duration: 250 });
+        if (k < idx.length) $('strokes').children[idx[k]].classList.add('demo');
+        else { $('preview').classList.remove('shake'); }
+      }, t + 600));
+      t += 950;
+    });
+    demo.timers.push(setTimeout(() => {
+      if (!demo || demo.stop) return;
+      idx.forEach(i => $('strokes').children[i].classList.remove('demo'));
+      demo.timers.push(setTimeout(run, 900));
+    }, t + 400));
+  };
+  run();
+}
+function stopDemo(byUser){
+  if (demo) {
+    demo.stop = true; demo.timers.forEach(clearTimeout); demo = null;
+    $('hand').style.opacity = 0;
+    $('strokes').querySelectorAll('.demo').forEach(p => p.classList.remove('demo'));
+  }
+  clearTimeout(stopDemo.idle);
+  if (byUser && li === 0 && !S.tut) stopDemo.idle = setTimeout(() => { if (!rec.f.length) startDemo(); }, 9000);
+}
+
+// ---------- 自動更新（WEB-07） ----------
+function checkUpdate(){
+  if (!/^https?:/.test(location.protocol)) return;
+  fetch(location.pathname + '?vcheck=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.text() : '').then(t => {
+    const m = t.match(new RegExp('__CP' + '_VER=\'([0-9A-Za-z-]+)\''));
+    if (!m || m[1] === VER) return;
+    if (document.querySelector('.ov.show')) return; // 過關畫面開住就等下次
+    const k = 'cp-reload-' + m[1];
+    if (sessionStorage.getItem(k) && Date.now() - +sessionStorage.getItem(k) < 120000) return;
+    sessionStorage.setItem(k, Date.now());
+    location.replace(location.pathname + '?v=' + m[1]);
+  }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { setAppH(); layout(); checkUpdate(); } });
+
+loadData();
+})();
+</script>
+</body>
+</html>
