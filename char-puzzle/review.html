@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>拆字對照表</title>
+<style>
+:root{--ink:#22313f;--ink2:#4b5d6e;--frame:#5fb39c;--sel:#ff5a2c;
+  --zi:"Kaiti TC","STKaiti","BiauKai","PingFang HK","Noto Sans HK","Microsoft JhengHei",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:#f4faf8;color:var(--ink);font-family:-apple-system,"PingFang HK","Noto Sans HK",sans-serif;padding:12px 12px 40px}
+h1{font-size:22px;margin:4px 0 6px}
+.leg{font-size:13px;color:var(--ink2);line-height:1.6;background:#fff;border:1px solid #cfe7df;border-radius:12px;padding:8px 10px}
+.bar{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.bar button,.bar a{padding:6px 9px;border-radius:10px;background:#e3f1ec;border:0;font:inherit;font-size:13px;font-weight:700;color:var(--ink);text-decoration:none}
+.bar button.on{background:var(--frame);color:#fff}
+.lv{background:#fff;border-radius:14px;padding:8px;margin-bottom:10px;box-shadow:0 2px 0 #d7ebe4}
+.lv h2{font-size:15px;margin:0 0 6px;display:flex;align-items:center;gap:8px}
+.lv h2 .b{font-family:var(--zi);font-size:30px}
+.cells{display:flex;flex-wrap:wrap;gap:6px}
+.cell{width:76px;border:1px solid #d6e6e0;border-radius:10px;padding:3px;text-align:center;font-size:12px}
+.cell svg{width:66px;height:66px;display:block;margin:0 auto;background:#fff;border:1px dashed #b9ddd2;border-radius:6px}
+.cell .c{font-family:var(--zi);font-size:20px;line-height:1.2}
+.cell.bonus{background:#fff6d6;border-color:#f2c14e}
+.cell.decoy{background:#eef;border-color:#b8bff0}
+</style>
+</head>
+<body>
+<h1>🔍 拆字對照表</h1>
+<div class="leg">每一格：上面係揀嘅筆畫（橙色），下面係砌出嘅字。白色＝要搵晒嘅字；<span style="background:#fff6d6">黃色</span>＝⭐ 加分字；<span style="background:#eef">藍色</span>＝簡體字陷阱（唔計分）。×N＝有 N 種揀法（顯示第一種）。見到唔啱嘅，記低關數同字話俾 Bill 嘅 AI 知。</div>
+<div class="bar" id="pages"></div>
+<div id="list">載入中…</div>
+<div class="bar"><a href="./">↩ 返遊戲</a></div>
+<script>
+(function(){
+const NS = 'http://www.w3.org/2000/svg';
+const $ = id => document.getElementById(id);
+const VER = String(Date.now()).slice(0, 7);
+function load(src){ return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src + '?v=' + VER; s.onload = ok; s.onerror = no; document.head.appendChild(s); }); }
+function svgFor(L, mask){
+  const idx = []; for (let i = 0; i < L.s.length; i++) if (Math.floor(mask / 2 ** i) % 2) idx.push(i);
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  idx.forEach(i => L.m[i].forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }));
+  const size = Math.max(x1 - x0 + 140, y1 - y0 + 140, 260), cx = (x0 + x1) / 2, cy = 900 - (y0 + y1) / 2;
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', (cx - size / 2) + ' ' + (cy - size / 2) + ' ' + size + ' ' + size);
+  const g = document.createElementNS(NS, 'g'); g.setAttribute('transform', 'scale(1,-1) translate(0,-900)');
+  L.s.forEach((d, i) => {
+    const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d);
+    const on = idx.includes(i);
+    p.setAttribute('fill', on ? '#ff5a2c' : '#e3e9e7'); p.setAttribute('stroke', '#fff'); p.setAttribute('stroke-width', size * 0.02); p.setAttribute('paint-order', 'stroke');
+    g.appendChild(p);
+  });
+  svg.appendChild(g);
+  return svg;
+}
+function cell(L, ch, masks, cls, label){
+  const d = document.createElement('div'); d.className = 'cell' + (cls ? ' ' + cls : '');
+  d.appendChild(svgFor(L, masks[0]));
+  const t = document.createElement('div'); t.innerHTML = '<span class="c">' + ch + '</span> ×' + masks.length + (label ? '<br>' + label : '');
+  d.appendChild(t);
+  return d;
+}
+let page = 0;
+function render(){
+  document.querySelectorAll('#pages button').forEach((b, i) => b.classList.toggle('on', i === page));
+  const list = $('list'); list.textContent = '載入中…';
+  load('levels/' + String(page).padStart(3, '0') + '.js').then(() => {
+    list.innerHTML = '';
+    window.LV_CHUNKS[page].forEach((L, k) => {
+      const box = document.createElement('div'); box.className = 'lv';
+      box.innerHTML = '<h2>第 ' + (page * 100 + k + 1) + ' 關 <span class="b">' + L.c + '</span>' + L.a.length + ' 隻字' + (L.b.length ? '＋' + L.b.length + ' 加分' : '') + '</h2>';
+      const cells = document.createElement('div'); cells.className = 'cells';
+      L.a.forEach(a => cells.appendChild(cell(L, a[0], a[1])));
+      (L.b || []).forEach(b => cells.appendChild(cell(L, b[0], b[1], 'bonus')));
+      L.d.forEach(dc => cells.appendChild(cell(L, dc[0], dc[2], 'decoy', '→' + dc[1])));
+      box.appendChild(cells); list.appendChild(box);
+    });
+    scrollTo(0, 0);
+  }).catch(() => { list.textContent = '載入唔到'; });
+}
+load('levels/index.js').then(() => {
+  const n = window.LV_INDEX.n, pages = $('pages');
+  for (let p = 0; p * 100 < n; p++) {
+    const b = document.createElement('button'); b.textContent = (p * 100 + 1) + '–' + Math.min(n, (p + 1) * 100);
+    b.onclick = () => { page = p; location.hash = p; render(); };
+    pages.appendChild(b);
+  }
+  page = Math.min(Math.max(0, parseInt(location.hash.slice(1), 10) || 0), Math.ceil(n / 100) - 1);
+  render();
+});
+})();
+</script>
+</body>
+</html>
