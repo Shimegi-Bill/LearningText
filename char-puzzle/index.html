@@ -14,7 +14,7 @@
 <title>拆字小偵探</title>
 <script>
 // 版本號：上載前一定要改（levels.js 會跟住呢個版本號載入）
-window.__CP_VER='2026-11-11-2';
+window.__CP_VER='2026-11-11-3';
 </script>
 <style>
 :root{
@@ -167,15 +167,60 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-
 .info-word .w{font-family:var(--zi);font-size:40px;line-height:1.1}
 .info-word .wr{font-size:15px;color:var(--ink2);margin-top:2px}
 .info-src{font-size:11px;color:#6b7c8a;text-align:center;margin-top:8px}
+/* 首頁 */
+#home{position:fixed;inset:0;z-index:15;display:none;flex-direction:column;align-items:center;overflow:auto;
+  background:linear-gradient(180deg,var(--bg1),var(--bg2));padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 14px)}
+#home.show{display:flex}
+.h-wrap{width:100%;max-width:440px;display:flex;flex-direction:column;align-items:center;gap:14px;margin:auto 0}
+.h-logo{width:118px;height:118px;border-radius:28px;background:#fff;border:4px solid var(--frame);box-shadow:0 6px 0 #bfe0d5;display:grid;place-items:center}
+.h-logo svg{width:96px;height:96px}
+.h-title{font-size:34px;font-weight:900;letter-spacing:3px;margin:2px 0 0}
+.h-sub{font-size:16px;color:var(--ink2);margin-top:-8px}
+.h-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%}
+.h-stat{background:#fff;border-radius:16px;padding:10px 4px;text-align:center;box-shadow:0 3px 0 #d7ebe4}
+.h-stat b{display:block;font-size:26px;color:var(--sel)}
+.h-stat span{font-size:13px;color:var(--ink2)}
+.h-go{width:100%;padding:16px 12px;border-radius:22px;background:#34d399;color:#06301f;font-size:22px;font-weight:900;box-shadow:0 6px 0 #1fa877;line-height:1.3}
+.h-go small{display:block;font-size:15px;font-weight:700;opacity:.85}
+.h-go:active{transform:translateY(4px);box-shadow:0 2px 0 #1fa877}
+.h-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%}
+.h-btn{background:#fff;border-radius:18px;padding:12px 4px;font-size:15px;font-weight:800;box-shadow:0 4px 0 #d7ebe4;display:flex;flex-direction:column;align-items:center;gap:4px}
+.h-btn i{font-style:normal;font-size:30px}
+.h-btn:active{transform:translateY(3px);box-shadow:0 1px 0 #d7ebe4}
+.h-rev{width:100%;background:#fff6d6;border:2px solid #f2c14e;border-radius:18px;padding:10px 14px;display:flex;align-items:center;gap:12px;text-align:left}
+.h-rev .c{font-family:var(--zi);font-size:46px;line-height:1}
+.h-rev .t{font-size:14px;color:#7a5200}
+.h-rev .t b{font-size:16px;color:var(--ink)}
+.h-foot{font-size:12px;color:#6b7c8a}
 #loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-size:20px;font-weight:700;background:linear-gradient(180deg,var(--bg1),var(--bg2));z-index:40}
 #loading .z{font-family:var(--zi);font-size:80px;animation:pulse 1.2s infinite}
 </style>
 </head>
 <body>
 <div id="loading"><div class="z">字</div><div>載入中…</div></div>
+<!-- 首頁 -->
+<div id="home"><div class="h-wrap">
+  <div class="h-logo"><svg viewBox="0 0 1024 1024"><path d="M512 40V984M40 512H984" stroke="#9ed5c5" stroke-width="14" stroke-dasharray="40 30"/><text x="512" y="800" text-anchor="middle" font-size="760" fill="#2f3e4e" style="font-family:var(--zi)">字</text></svg></div>
+  <div class="h-title">拆字小偵探</div>
+  <div class="h-sub">揀筆畫，砌出新嘅字 🔍</div>
+  <div class="h-stats">
+    <div class="h-stat"><b id="hDone">0</b><span>完成關卡</span></div>
+    <div class="h-stat"><b id="hZi">0</b><span>識嘅字</span></div>
+    <div class="h-stat"><b id="hStar">0</b><span>⭐ 星星</span></div>
+  </div>
+  <button id="hGo" class="h-go">▶ 開始</button>
+  <div class="h-grid">
+    <button id="hPick" class="h-btn"><i>🔢</i>揀關卡</button>
+    <button id="hRec" class="h-btn"><i>📖</i>我嘅紀錄</button>
+    <button id="hSet" class="h-btn"><i>⚙️</i>設定</button>
+  </div>
+  <button id="hRev" class="h-rev" style="display:none"><span id="hRevC" class="c"></span><span class="t"><b>溫習一隻字</b><br><span id="hRevT"></span></span></button>
+  <div class="h-foot">由 Bill Chiu 開發 · 一共 <span id="hN">2000</span> 關</div>
+</div></div>
+
 <div id="app">
   <header class="top">
-    <button id="btnSet" class="iconbtn" aria-label="設定">⚙️</button>
+    <button id="btnHome" class="iconbtn" aria-label="首頁">🏠</button>
     <div class="ttl">
       <button id="lvTitle" class="lvbtn" aria-label="揀關卡">第 1 關<small>▾</small></button>
       <div id="lvSub">搵出 <b id="nTotal">0</b> 隻字　已搵到 <b id="nFound" class="f">0</b></div>
@@ -331,7 +376,7 @@ function recOf(ch){ if (!S.lv[ch]) S.lv[ch] = { f: [], x: [], h: 0, done: false,
 function start(){
   li = S.cur ? levelIndexOf(S.cur) : 0;
   $('verTxt').textContent = VER; $('nLv').textContent = NLV;
-  openLevel(li).then(() => { $('loading').style.display = 'none'; checkUpdate(); });
+  openLevel(li).then(() => { $('loading').style.display = 'none'; showHome(); checkUpdate(); });
 }
 
 // ---------- 關卡 ----------
@@ -727,7 +772,40 @@ function renderRec(){
 }
 
 // 設定
-$('btnSet').onclick = () => { unlockAudio(); stopDemo(true); renderSet(); show('ovSet'); };
+// ---------- 首頁 ----------
+const homeOn = () => $('home').classList.contains('show');
+function showHome(){
+  stopDemo();
+  const done = INDEX.list.filter(x => S.lv[x[0]] && S.lv[x[0]].done).length;
+  const zi = new Set(); let stars = 0;
+  Object.values(S.lv).forEach(r => { r.f.forEach(c => zi.add(c)); (r.x || []).forEach(c => zi.add(c)); stars += r.done ? (r.stars || 1) : 0; });
+  $('hDone').textContent = done; $('hZi').textContent = zi.size; $('hStar').textContent = stars; $('hN').textContent = NLV;
+  const started = Object.values(S.lv).some(r => r.f.length || r.done || r.skip);
+  $('hGo').innerHTML = (started ? '▶ 繼續' : '▶ 開始') + '<small>第 ' + (li + 1) + ' 關「' + INDEX.list[li][0] + '」</small>';
+  // 溫習：隨機揀一隻識咗嘅字
+  const list = [...zi];
+  if (list.length) {
+    const ch = list[Math.floor(Math.random() * list.length)], d = DICT[ch] || [];
+    $('hRevC').textContent = ch;
+    $('hRevT').textContent = (d[0] || '') + (d[3] ? '　例：' + d[3] : '') + '　撳我睇解釋';
+    $('hRev').onclick = () => openInfo(ch);
+    $('hRev').style.display = '';
+  } else $('hRev').style.display = 'none';
+  $('home').classList.add('show');
+}
+function leaveHome(){
+  $('home').classList.remove('show');
+  layout();
+  if (li === 0 && !S.tut && rec && rec.f.length === 0) setTimeout(startDemo, 600);
+}
+$('btnHome').onclick = () => { unlockAudio(); showHome(); };
+$('hGo').onclick = () => { unlockAudio(); leaveHome(); };
+$('hPick').onclick = () => { unlockAudio(); leaveHome(); $('lvTitle').onclick(); };
+$('hRec').onclick = () => { unlockAudio(); renderRec(); show('ovRec'); };
+$('hSet').onclick = () => { unlockAudio(); renderSet(); show('ovSet'); };
+// 喺首頁開關卡（揀關卡、紀錄）：自動離開首頁
+const _open = openLevel;
+openLevel = function(i){ if (homeOn()) $('home').classList.remove('show'); return _open(i); };
 function renderSet(){
   document.querySelectorAll('#segRead button').forEach(b => b.classList.toggle('on', b.dataset.v === S.set.read));
   document.querySelectorAll('#segVoice button').forEach(b => b.classList.toggle('on', (b.dataset.v === '1') === !!S.set.voice));
@@ -792,7 +870,7 @@ function confetti(){
 // ---------- 第一關示範：隻手示範揀筆畫再撳確定（唔用文字） ----------
 let demo = null;
 function startDemo(){
-  if (demo || li !== 0 || S.tut || rec.f.length) return;
+  if (demo || li !== 0 || S.tut || rec.f.length || homeOn()) return;
   // 揀一隻 2–3 筆嘅答案嚟示範
   const a = L.a.find(x => popcount(x[1][0]) >= 2 && popcount(x[1][0]) <= 3 && x[0] !== L.c) || L.a[0];
   const idx = []; for (let i = 0; i < L.s.length; i++) if (Math.floor(a[1][0] / 2 ** i) % 2) idx.push(i);
