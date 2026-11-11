@@ -211,7 +211,7 @@ function geomScore(bStrokes, xStrokes) {
 // 3. 每兩筆：交叉、相接、分開要一樣（原本喺右邊唔可以變插穿；「下」個直要掂住個橫）；左右、上下位置要一樣
 // 4. 長度同距離唔理；幾隻字都合規則先用形狀分數揀最似嗰隻
 const TK = 32;
-const TYPE_TOL = +(process.env.TYPE_TOL || 15);
+const TYPE_TOL = +(process.env.TYPE_TOL || 20);
 function chordAng(p, i, j) { return Math.atan2(p[j][1] - p[i][1], p[j][0] - p[i][0]); }
 function strokeClass(a) {
   const d = a / DEG;
@@ -283,8 +283,10 @@ function typeCompat(a, b) {
   if (a.pieces.length === 1 && a.hook !== b.hook) return false;
   for (let i = 0; i < a.pieces.length; i++) {
     const p = a.pieces[i], q = b.pieces[i];
-    // 同一類（橫、提、直、撇、點）先得；分界附近（例如斜少少嘅直同點）差 15° 以內通融
-    if (p.c !== q.c && angDiff(p.a, q.a) > TYPE_TOL * DEG) return false;
+    // 同一類（橫、提、直、撇、點）先得；分界附近差 TYPE_TOL（20°）以內通融（「月」嘅豎撇 −104° 當直 −88°）；
+    // 有轉角嘅筆每段差 30° 以內都得（楷書「口」「尺」嘅 𠃌 右邊斜向內，「巾」「尸」係直落）
+    const tol = a.pieces.length > 1 ? 30 : TYPE_TOL;
+    if (p.c !== q.c && angDiff(p.a, q.a) > tol * DEG) return false;
   }
   return true;
 }
@@ -341,11 +343,19 @@ function link(A, B) {
   ].sort((x, y) => x.d - y.d)[0];
   const pa = cand.side === 'a' ? cand.e : cand.u, pb = cand.side === 'a' ? cand.u : cand.e;
   const k = cand.d <= 40 ? 'T' : cand.d >= 75 ? 'A' : '?';
-  return { k, pa, pb };
+  return { k, pa, pb, d: cand.d };
 }
 const POS_TOL = +(process.env.POS_TOL || 0.3);
+const GAP_MAX = +(process.env.GAP_MAX || 0.2);
 // weak：目標字嗰兩筆「差少少掂到」，但兩筆都已經掂住／交叉其他筆（例如「大」嘅捺貼住撇，佢近橫只係順便）→ 唔理遠近
-function linkOk(x, b, weak = false) {
+// 一筆喺唔喺其他筆圍住嘅範圍（外框）入面：「日」中間嗰橫喺口入面；「銀」嘅捺喺王外面
+function insideOthers(strokes, i) {
+  const others = strokes.filter((_, k) => k !== i);
+  if (!others.length) return false;
+  const b = bbox(others), mx = 0.03 * Math.max(b.w, b.h, 1);
+  return strokes[i].cx > b.x0 - mx && strokes[i].cx < b.x1 + mx && strokes[i].cy > b.y0 - mx && strokes[i].cy < b.y1 + mx;
+}
+function linkOk(x, b, weak = false, size = 0, sameInside = true) {
   if (weak && x.k === '?') return b.k !== 'X';
   if (x.k === 'X' || b.k === 'X') {
     if (x.k !== b.k) return false;
@@ -354,7 +364,12 @@ function linkOk(x, b, weak = false) {
   // x ＝ 目標字，b ＝ 母字嗰兩筆
   // 目標字分開：母字分開或者差少少掂到都得（「午」）；目標字掂住／差少少掂住：母字一定要差唔多掂住（「玉」嗰點貼住王，唔可以用離好遠嘅捺）
   if (x.k === 'A') return b.k === 'A' || b.k === '?';
-  if (b.k === 'A') return false;
+  // 目標字掂住，母字分開：空隙細過揀咗嗰組筆畫大細嘅 GAP_MAX（兩成）就當差少少（「因」入面個口加大嘅橫 → 日）；
+  // 離好遠就唔得（「玉」嗰點唔可以用離好遠嘅捺）
+  if (b.k === 'A') {
+    if (!(size > 0) || b.d / size > GAP_MAX || !sameInside) return false;
+    return Math.abs(x.pa - b.pa) <= POS_TOL && Math.abs(x.pb - b.pb) <= POS_TOL;
+  }
   // 相接（或者差唔多相接）：掂住嘅位置要差唔多
   return Math.abs(x.pa - b.pa) <= POS_TOL && Math.abs(x.pb - b.pb) <= POS_TOL;
 }
@@ -417,6 +432,7 @@ function ruleCheck(B, X, idx, lenient = false) {
   for (let i = 0; i < n; i++) if (!typeCompat(TX[i], TB[idx[i]])) return null;
   const xb = bbox(XF), xs = Math.max(xb.w, xb.h, 1);
   const sub = idx.map(j => BF[j]), bb = bbox(sub), bs = Math.max(bb.w, bb.h, 1);
+  const inX = XF.map((_, i) => insideOthers(XF, i)), inB = sub.map((_, i) => insideOthers(sub, i));
   for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) {
     const lx = CX[i][k], lb = CB[idx[i]][idx[k]];
     if (lenient) {
@@ -424,7 +440,7 @@ function ruleCheck(B, X, idx, lenient = false) {
       if ((lx.k === 'X') !== (lb.k === 'X')) return null;
       continue;
     }
-    if (!linkOk(lx, lb, AX[i] && AX[k])) return null;
+    if (!linkOk(lx, lb, AX[i] && AX[k], bs, inX[i] === inB[i] && inX[k] === inB[k])) return null;
     // 掂住或者交叉：位置由掂住嘅地方決定（唔用中心點，因為長短會影響中心點）；分開先比左右上下
     if (lx.k === 'T' || lx.k === 'X' || lb.k === 'T' || lb.k === 'X') continue;
     const [sx, sy] = posSign(XF, i, k, xs);
@@ -454,7 +470,8 @@ function findSubsetsRule(B, X, limit = 4000) {
       let ok = true;
       for (let k = 0; k < i && ok; k++) {
         const lx = CX[k][i], lb = CB[pick[k]][j];
-        if (!linkOk(lx, lb, AX[k] && AX[i])) { ok = false; break; }
+        // 剪枝時未知成組大細：用成隻字大細（1024）寬鬆咁判斷，最後 ruleCheck 再準確檢查
+        if (!linkOk(lx, lb, AX[k] && AX[i], 1024 / GAP_MAX * 0.3)) { ok = false; break; }
         if (lx.k === 'T' || lx.k === 'X' || lb.k === 'T' || lb.k === 'X') continue;
         // 剪枝：方向相反（用成隻母字大細，寬鬆）就唔使再試
         const [sx, sy] = sgn[k][i], dx = BF[j].cx - BF[pick[k]].cx, dy = BF[j].cy - BF[pick[k]].cy;
@@ -527,6 +544,9 @@ const rels = ch => { if (!relCache.has(ch)) relCache.set(ch, relMatrix(feat(ch))
 // 答案只用小朋友識嘅字：香港小學字表（kGradeLevel）或者常用頻率 1–3
 const isKid = ch => isHK(ch) && (U[ch].kGradeLevel || +(U[ch].kFrequency || 9) <= 3);
 const HK = [...G.keys()].filter(isKid);
+// 加分字：其他香港常用字（尸、卜、沐…），砌到都計，但唔使搵晒先過關
+const HKX = [...G.keys()].filter(c => isHK(c) && !isKid(c));
+const BONUS_PEN = 0.05; // 同一組筆畫，小學字優先
 const SIMP = [...G.keys()].filter(c => tradOf(c));
 const nStrokes = ch => G.get(ch).medians.length;
 
@@ -590,11 +610,11 @@ function checkMapping(BF, XF, RB, RX, idx) {
 function solveBase(B) {
   const BF = feat(B), m = BF.length, RB = rels(B);
   const bySubset = new Map(); // mask → [{ch, score, simp}]
-  const add = (ch, list, simp) => {
+  const add = (ch, list, simp, bonus = false) => {
     for (const f of list) {
       const key = f.idx.join(',');
       if (!bySubset.has(key)) bySubset.set(key, []);
-      bySubset.get(key).push({ ch, score: f.score, simp, idx: f.idx });
+      bySubset.get(key).push({ ch, score: f.score + (bonus ? BONUS_PEN : 0), simp, bonus, idx: f.idx });
     }
   };
   for (const X of HK) {
@@ -608,14 +628,20 @@ function solveBase(B) {
   components(B, [...Array(m).keys()], comps);
   // 部件：3 筆以上（例如「湘」入面嘅「木」「目」、「媽」入面嘅「女」）照信；
   // 1–2 筆嘅細部件要合規則（筆畫類型、交叉、位置），例如「慎」入面得一點嘅「乙」唔算
+  for (const X of HKX) {
+    const n = nStrokes(X);
+    if (n >= m) continue;
+    add(X, findSubsetsRule(B, X), false, true);
+  }
   for (const { c, idx } of comps) {
-    if (!isKid(c)) continue;
+    if (!isHK(c)) continue;
+    const bonus = !isKid(c);
     if (idx.length >= 3) {
-      if (ruleCheck(B, c, idx, true) !== null) add(c, [{ idx, score: 0.02 }], false);
+      if (ruleCheck(B, c, idx, true) !== null) add(c, [{ idx, score: 0.02 }], false, bonus);
       continue;
     }
     const sc = ruleCheck(B, c, idx);
-    if (sc !== null) add(c, [{ idx, score: Math.min(sc, 0.02) }], false);
+    if (sc !== null) add(c, [{ idx, score: Math.min(sc, 0.02) }], false, bonus);
   }
   for (const X of SIMP) {
     const n = nStrokes(X);
@@ -623,23 +649,23 @@ function solveBase(B) {
     add(X, findSubsetsRule(B, X), true);
   }
   // 同一組筆畫只俾最似嗰隻字（規則已經判斷咗啱唔啱，形狀分數只用嚟揀）
-  const answers = new Map(), decoys = new Map();
+  const answers = new Map(), decoys = new Map(), bonus = new Map();
   for (const [key, list] of bySubset) {
     list.sort((a, b) => a.score - b.score);
     const best = list[0];
     // 規則合晒都要整體形狀唔可以太離譜（例如散到成隻字都係嘅「卞」）
     if (best.score > SHAPE_CAP) continue;
-    const tgt = best.simp ? decoys : answers;
+    const tgt = best.simp ? decoys : best.bonus ? bonus : answers;
     if (!tgt.has(best.ch)) tgt.set(best.ch, []);
     tgt.get(best.ch).push({ idx: best.idx, score: best.score });
   }
-  return { answers, decoys };
+  return { answers, decoys, bonus };
 }
 
 function fmt(B, res) {
   const a = [...res.answers.entries()].map(([ch, subs]) => `${ch}(${subs.length}, ${subs[0].score.toFixed(3)}${U[ch]?.kGradeLevel ? ' g' + U[ch].kGradeLevel : ''})`);
   const d = [...res.decoys.keys()].map(c => c + '→' + tradOf(c));
-  return `${B} [${nStrokes(B)}畫] 答案 ${res.answers.size}: ${a.join(' ')}\n   簡體: ${d.join(' ')}`;
+  return `${B} [${nStrokes(B)}畫] 答案 ${res.answers.size}: ${a.join(' ')}\n   加分: ${[...res.bonus.keys()].join(' ')}\n   簡體: ${d.join(' ')}`;
 }
 
 if (TEST && !process.argv.includes("--debug")) {
@@ -702,7 +728,7 @@ function readOldBases(file) {
   const obj = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
   return obj.levels ? obj.levels.map(l => l.c) : obj.list.map(x => x[0]);
 }
-if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from')) {
+if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from' && a !== '--order-from')) {
   const t0 = Date.now();
   const TARGET = +(process.env.TARGET || 2000), CHUNK = 100;
   const KEEP = new Set();
@@ -743,6 +769,15 @@ if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from'))
     r.diff = r.n + 0.6 * Math.min(r.count, 24) + 0.5 * avgS + 0.8 * (grade(r.B) - 1);
   });
   chosen.sort((x, y) => x.diff - y.diff || x.B.localeCompare(y.B));
+  // 關數唔變：--order-from 舊 index.js，舊關照舊次序，新關排喺後面
+  const oi = process.argv.indexOf('--order-from');
+  if (oi > 0) {
+    const ORDER = new Map(readOldBases(process.argv[oi + 1]).map((c, k) => [c, k]));
+    const known = chosen.filter(r => ORDER.has(r.B)).sort((x, y) => ORDER.get(x.B) - ORDER.get(y.B));
+    const unknown = chosen.filter(r => !ORDER.has(r.B));
+    chosen.splice(0, chosen.length, ...known, ...unknown);
+    console.log('order kept', known.length, 'new', unknown.length);
+  }
 
   const R = {}; // 讀音表
   const reads = ch => { if (!R[ch]) { const r = reading(ch); R[ch] = [r.jp, r.py]; } };
@@ -756,12 +791,15 @@ if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from'))
       .sort((a, b) => (a[0] === B) - (b[0] === B) || nStrokes(a[0]) - nStrokes(b[0]) || a[0].localeCompare(b[0]));
     const answers = keep.map(([ch, subs]) => { reads(ch); return [ch, subs.sort((x, y) => x.score - y.score).slice(0, 150).map(x => mask(x.idx))]; });
     const decoys = [...res.decoys.entries()].map(([ch, subs]) => [ch, tradOf(ch), subs.sort((x, y) => x.score - y.score).slice(0, 30).map(x => mask(x.idx))]);
+    const bonusL = [...res.bonus.entries()].filter(([ch]) => ch !== B).sort((a, b) => nStrokes(a[0]) - nStrokes(b[0]))
+      .map(([ch, subs]) => { reads(ch); return [ch, subs.sort((x, y) => x.score - y.score).slice(0, 60).map(x => mask(x.idx))]; });
     return {
       c: B,
       s: d.strokes.map(p => p.replace(/\s+/g, ' ').trim()),
       m: d.medians.map(m => m.map(([x, y]) => [Math.round(x), Math.round(y)])),
       a: answers,
       d: decoys,
+      b: bonusL,
     };
   });
   const dir = path.join(ROOT, 'char-puzzle', 'levels');
@@ -779,7 +817,7 @@ if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from'))
   }
   // 用到嘅字（母字 ＋ 答案 ＋ 陷阱嘅繁體），俾 build_dict.py 整解釋
   const chars = new Set();
-  levels.forEach(l => { chars.add(l.c); l.a.forEach(a => chars.add(a[0])); l.d.forEach(d => chars.add(d[1])); });
+  levels.forEach(l => { chars.add(l.c); l.a.forEach(a => chars.add(a[0])); l.d.forEach(d => chars.add(d[1])); l.b.forEach(b => chars.add(b[0])); });
   fs.writeFileSync(path.join(dir, 'chars.txt'), [...chars].join('') + '\n');
   const old = path.join(ROOT, 'char-puzzle', 'levels.js');
   if (fs.existsSync(old)) fs.rmSync(old);
@@ -855,7 +893,7 @@ if (process.argv.includes('--why')) {
     const fx = q => q ? `${q.k}(${q.pa.toFixed(2)},${q.pb.toFixed(2)})` : '-';
     const touchy = [CX[a][b].k, CB[idx[a]][idx[b]].k].some(k => k === 'T' || k === 'X');
     const AX = attached(X);
-    console.log(`  ${a}-${b} 關係 ${fx(CX[a][b])}↔${fx(CB[idx[a]][idx[b]])} ${linkOk(CX[a][b], CB[idx[a]][idx[b]], AX[a] && AX[b]) ? 'ok' : '✗'}${touchy ? '（掂住：唔比中心）' : ''}  左右 ${sx}↔${dx.toFixed(2)} ${posOk(sx, dx) ? 'ok' : '✗'}  上下 ${sy}↔${dy.toFixed(2)} ${posOk(sy, dy) ? 'ok' : '✗'}`);
+    console.log(`  ${a}-${b} 關係 ${fx(CX[a][b])}↔${fx(CB[idx[a]][idx[b]])} ${linkOk(CX[a][b], CB[idx[a]][idx[b]], AX[a] && AX[b], bs) ? 'ok' : '✗'}${touchy ? '（掂住：唔比中心）' : ''}  左右 ${sx}↔${dx.toFixed(2)} ${posOk(sx, dx) ? 'ok' : '✗'}  上下 ${sy}↔${dy.toFixed(2)} ${posOk(sy, dy) ? 'ok' : '✗'}`);
   }
   console.log('  →', ruleCheck(B, X, idx));
 }
@@ -872,5 +910,14 @@ if (process.argv.includes('--xdiff')) {
   for (let a = 0; a < idx.length; a++) for (let b = a + 1; b < idx.length; b++) {
     const lx = CX[a][b], lb = CB[idx[a]][idx[b]];
     if ((lx.k === 'X') !== (lb.k === 'X')) console.log(`  ${X}第${a}筆-第${b}筆 ${lx.k}(${lx.pa.toFixed(2)},${lx.pb.toFixed(2)}) ↔ ${B} ${lb.k}(${lb.pa.toFixed(2)},${lb.pb.toFixed(2)})`);
+  }
+}
+if (process.argv.includes('--gap')) {
+  // 印「目標字掂住、母字分開」嗰啲對嘅空隙比例：node build_levels.mjs <dataDir> --gap 因 日 0,1,3,6
+  const i = process.argv.indexOf('--gap'); const B = process.argv[i + 1], X = process.argv[i + 2], idx = process.argv[i + 3].split(',').map(Number);
+  const BF = feat(B), CB = crossMatrix(B), CX = crossMatrix(X), bb = bbox(idx.map(j => BF[j])), bs = Math.max(bb.w, bb.h, 1);
+  for (let a = 0; a < idx.length; a++) for (let b = a + 1; b < idx.length; b++) {
+    const lx = CX[a][b], lb = CB[idx[a]][idx[b]];
+    if (lx.k !== 'A' && lb.k === 'A') console.log(`  ${a}-${b} 目標 ${lx.k} 母字 A 空隙 ${lb.d.toFixed(0)} / 大細 ${bs.toFixed(0)} = ${(lb.d / bs).toFixed(3)}  位置 ${lx.pa.toFixed(2)},${lx.pb.toFixed(2)} ↔ ${lb.pa.toFixed(2)},${lb.pb.toFixed(2)}`);
   }
 }

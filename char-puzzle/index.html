@@ -14,7 +14,7 @@
 <title>拆字小偵探</title>
 <script>
 // 版本號：上載前一定要改（levels.js 會跟住呢個版本號載入）
-window.__CP_VER='2026-11-11-1';
+window.__CP_VER='2026-11-11-2';
 </script>
 <style>
 :root{
@@ -135,6 +135,9 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-
 .lvbtn:active{background:#fff}
 .lvbtn small{font-size:15px;color:var(--ink2);margin-left:2px}
 .msg.tap{cursor:pointer}
+.bonus{flex:none;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px 6px;font-size:13px;font-weight:700;color:#a86b00;min-height:0;margin-top:2px}
+.bonus:empty{display:none}
+.bonus button{font-family:var(--zi);font-size:20px;line-height:1;padding:3px 6px;border-radius:8px;background:#fff6d6;border:2px solid #f2c14e}
 .pk-go{display:flex;gap:8px;justify-content:center;align-items:center;margin-bottom:10px;font-size:17px;font-weight:700}
 .pk-go input{width:96px;font:inherit;font-size:20px;padding:8px 10px;border:2px solid var(--frame);border-radius:12px;text-align:center}
 .pk-pages{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-bottom:10px}
@@ -180,6 +183,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-
     <button id="btnRec" class="iconbtn" aria-label="紀錄">📖</button>
   </header>
   <section id="grid" class="grid"></section>
+  <section id="bonus" class="bonus"></section>
   <section class="mid">
     <div id="preview" class="pbox"><svg id="pv" viewBox="0 0 1024 1024"></svg></div>
     <div id="msg" class="msg">揀筆畫，砌出新嘅字！</div>
@@ -232,6 +236,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;touch-
     點樣先算：每一筆嘅類型（橫、直、撇、點、提）唔可以變，直鉤（亅）唔可以當直（丨）；兩筆之間交叉、掂住定分開，同埋左右上下位置都要一樣；長短同距離唔理。<br>
     只收香港常用繁體字（《常用字字形表》），簡體字唔計。<br>
     一共 <span id="nLv"></span> 關，由易到難排；撳頂部「第幾關」可以揀關。撳搵到嘅字會顯示解釋、詞語同讀音。<br>
+    格仔入面係小學字，要搵晒先過關；其他香港常用字（例如「尸」「卜」）係「⭐ 加分字」，砌到都計，唔使搵晒。<br>
     筆畫：Make Me a Hanzi（Arphic Public License）；字表：Unicode Unihan；解釋、詞語、拼音：教育部《重編國語辭典修訂本》（CC BY-ND 3.0 TW）；粵拼：rime-cantonese（CC BY 4.0）；詞頻：jieba。<br>
     版本 <span id="verTxt"></span>
   </div>
@@ -321,7 +326,7 @@ function loadData(){
 }
 
 function levelIndexOf(ch){ const i = INDEX.list.findIndex(x => x[0] === ch); return i < 0 ? 0 : i; }
-function recOf(ch){ if (!S.lv[ch]) S.lv[ch] = { f: [], h: 0, done: false, skip: false }; return S.lv[ch]; }
+function recOf(ch){ if (!S.lv[ch]) S.lv[ch] = { f: [], x: [], h: 0, done: false, skip: false }; return S.lv[ch]; }
 
 function start(){
   li = S.cur ? levelIndexOf(S.cur) : 0;
@@ -349,10 +354,11 @@ function showLevel(i){
   S.cur = L.c; S.max = Math.max(S.max || 0, li);
   rec = recOf(L.c);
   rec.f = rec.f.filter(ch => L.a.some(a => a[0] === ch));
+  rec.x = (rec.x || []).filter(ch => (L.b || []).some(b => b[0] === ch));
   save();
   sel.clear(); hintTarget = null; hintStage = 0;
   $('lvTitle').innerHTML = '第 ' + (li + 1) + ' 關<small>▾</small>';
-  renderStrokes(); renderGrid(); renderPreview(); updateCount();
+  renderStrokes(); renderGrid(); renderBonus(); renderPreview(); updateCount();
   say(rec.f.length ? '繼續搵！仲有 ' + (L.a.length - rec.f.length) + ' 隻' : '揀筆畫，砌出新嘅字！');
   layout();
   stopDemo();
@@ -384,6 +390,15 @@ function renderGrid(){
     if (ch) cell.querySelector('.box').onclick = () => openInfo(ch);
     grid.appendChild(cell);
   });
+}
+// 加分字：其他香港常用字（尸、卜…），砌到都計，唔使搵晒先過關
+function renderBonus(){
+  const el = $('bonus'); el.innerHTML = '';
+  const nb = (L.b || []).length;
+  if (!nb) return;
+  const t = document.createElement('span'); t.textContent = '⭐ 加分字 ' + rec.x.length + '/' + nb + (rec.x.length ? '：' : '');
+  el.appendChild(t);
+  rec.x.forEach(ch => { const b = document.createElement('button'); b.textContent = ch; b.onclick = () => openInfo(ch); el.appendChild(b); });
 }
 function updateCount(){
   $('nTotal').textContent = L.a.length;
@@ -515,6 +530,17 @@ function submit(){
     if (rec.f.length === L.a.length) setTimeout(levelDone, 900);
     return;
   }
+  const bon = (L.b || []).find(b => b[1].includes(m));
+  if (bon) {
+    const ch = bon[0];
+    if (rec.x.includes(ch)) { say('「<span class="big">' + ch + '</span>」加分字已經搵到喇 ⭐', 'warn', ch); sfx('dup'); speak(ch); return; }
+    rec.x.push(ch); save();
+    sel.clear(); paintSel(); renderBonus(); layout();
+    const dw = DICT[ch] && DICT[ch][3];
+    say('好叻！「<span class="big">' + ch + '</span>」係加分字 ⭐' + (dw ? ' · 例：' + dw + ' 📖' : ''), 'good', ch);
+    sfx('good'); speak(ch);
+    return;
+  }
   const dec = L.d.find(d => d[2].includes(m));
   if (dec) {
     say('「<span class="big">' + dec[0] + '</span>」係簡體字 🙅 繁體係「<span class="big">' + dec[1] + '</span>」', 'bad');
@@ -560,6 +586,12 @@ function levelDone(){
   rec.f.forEach(ch => {
     const c = document.createElement('button'); c.className = 'chip';
     c.innerHTML = '<span class="c">' + ch + '</span><span class="r">' + (readingOf(ch) || '&nbsp;') + '</span>';
+    c.onclick = () => openInfo(ch);
+    $('winChips').appendChild(c);
+  });
+  rec.x.forEach(ch => {
+    const c = document.createElement('button'); c.className = 'chip'; c.style.borderColor = '#f2c14e'; c.style.background = '#fff6d6';
+    c.innerHTML = '<span class="c">' + ch + '</span><span class="r">⭐ ' + (readingOf(ch) || '') + '</span>';
     c.onclick = () => openInfo(ch);
     $('winChips').appendChild(c);
   });
@@ -669,7 +701,7 @@ $('tabZi').onclick = () => { recTab = 'zi'; renderRec(); };
 function renderRec(){
   $('tabLv').classList.toggle('on', recTab === 'lv'); $('tabZi').classList.toggle('on', recTab === 'zi');
   const done = INDEX.list.filter(x => S.lv[x[0]] && S.lv[x[0]].done).length;
-  const zi = new Set(); Object.values(S.lv).forEach(r => r.f.forEach(c => zi.add(c)));
+  const zi = new Set(); Object.values(S.lv).forEach(r => { r.f.forEach(c => zi.add(c)); (r.x || []).forEach(c => zi.add(c)); });
   $('recSum').innerHTML = '完成 <b>' + done + '</b> / ' + NLV + ' 關　識 <b>' + zi.size + '</b> 隻字';
   const body = $('recBody'); body.innerHTML = '';
   if (recTab === 'zi') {
@@ -688,7 +720,7 @@ function renderRec(){
     if (r && r.done) { st = '⭐'.repeat(r.stars || 1) + ' 完成'; col = 'var(--good)'; }
     else if (r && r.skip) { st = '跳過 · ' + r.f.length + '/' + l.a.length; col = 'var(--warn)'; }
     else { st = (r ? r.f.length : 0) + '/' + l.a.length + ' 玩緊'; col = 'var(--ink2)'; }
-    row.innerHTML = '<span class="n">第' + (i + 1) + '關</span><span class="b">' + l.c + '</span><span class="info"><div class="st" style="color:' + col + '">' + st + '</div><div class="fs">' + (r ? r.f.join('') : '') + '</div></span>';
+    row.innerHTML = '<span class="n">第' + (i + 1) + '關</span><span class="b">' + l.c + '</span><span class="info"><div class="st" style="color:' + col + '">' + st + '</div><div class="fs">' + (r ? r.f.join('') + ((r.x || []).length ? ' ⭐' + r.x.join('') : '') : '') + '</div></span>';
     row.onclick = () => { hide('ovRec'); openLevel(i); };
     body.appendChild(row);
   }

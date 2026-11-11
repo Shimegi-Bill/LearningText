@@ -15,6 +15,7 @@
 4. 撳搵到嘅字（頂嘅格仔、訊息、過關卡、我識嘅字）會彈出「字卡」：解釋、例子詞語、粵拼同普通話拼音，🔊 讀出字同詞語。
 5. 搵晒頂嘅格仔先會過關，去下一隻母字。
 6. 揀到簡體字（例如「赛」）會話佢係簡體字同埋繁體係點寫，唔計分。
+7. 格仔入面係小學字，要搵晒先過關；其他香港常用字（例如「尸」「卜」「沐」）係「⭐ 加分字」，砌到都計，喺格仔下面顯示，唔使搵晒。
 
 | 掣 | 做咩 |
 |---|---|
@@ -69,7 +70,7 @@ git clone --depth 1 https://github.com/g0v/moedict-data && xz -dk moedict-data/d
 mkdir rime && for f in jyut6ping3.words.dict.yaml jyut6ping3.chars.dict.yaml; do curl -o rime/$f https://raw.githubusercontent.com/rime/rime-cantonese/main/$f; done
 curl -O https://raw.githubusercontent.com/fxsjy/jieba/master/extra_dict/dict.txt.big
 # 2. 出關卡（大約 1 分鐘；先將舊 levels/index.js 抄去其他地方，用 --keep-from 保留舊母字）
-node <repo>/tools/build_levels.mjs ~/cp-data --keep-from 舊index.js
+node <repo>/tools/build_levels.mjs ~/cp-data --keep-from 舊index.js --order-from 舊index.js
 # 3. 出字典
 python3 -I <repo>/tools/build_dict.py --moe moedict-data/dict-revised.json --concised moedict-data/dict-concised.audio.json \
   --jieba dict.txt.big --rime rime --unihan unihan.json --chars <repo>/char-puzzle/levels/chars.txt --out <repo>/char-puzzle/levels/dict.js
@@ -81,16 +82,17 @@ node <repo>/tools/build_levels.mjs ~/cp-data --debug 湘 木
 
 點樣判斷「揀嘅筆畫係咪一隻字」（`build_levels.mjs`，第三版規則，Bill 2026-11-10 定）：
 1. 每一筆分類：橫、提、直、撇、點／捺；有轉角就分段（例如 𠃌 ＝ 橫＋直）；收筆鉤另外記（見第 7 點）；慢慢彎嘅「豎撇」當撇。
-2. 候選字每一筆按筆順對應母字其中一筆，類型要一樣（撇唔可以當橫）。分界附近（例如斜少少嘅直）差 15° 以內通融。
+2. 候選字每一筆按筆順對應母字其中一筆，類型要一樣（撇唔可以當橫）。分界附近差 20° 以內通融（「月」嘅豎撇當直）；有轉角嘅筆每段差 30° 以內都得（楷書「口」「尺」嘅 𠃌 右邊斜向內，「巾」「尸」係直落）。
 3. 每兩筆嘅關係要一樣：交叉、掂住、分開。掂住或者交叉嘅位置（喺筆畫個頭、中間定尾）要差唔多，例如「丁」係直筆個頭掂住橫筆中間。
-   - 目標字分開：母字分開或者差少少掂到都得（「午」）。目標字掂住或者差少少掂住：母字都要差唔多掂住（「玉」嗰點貼住王，唔可以用離好遠嘅捺）；不過兩筆都已經掂住其他筆嘅，「差少少掂到」唔理（「大」嘅捺貼住撇）。
+   - 目標字分開：母字分開或者差少少掂到都得（「午」）。目標字掂住或者差少少掂住：母字都要差唔多掂住；如果母字分開，空隙要細過嗰組筆畫大細嘅兩成，而且嗰筆喺唔喺其他筆嘅範圍入面要同目標字一樣（「因」入面個口加大嘅橫 → 日；「銀」嘅捺喺王外面，唔係「玉」）；兩筆都已經掂住其他筆嘅，「差少少掂到」唔理（「大」嘅捺貼住撇）。
 4. 分開嘅兩筆：左右、上下位置要一樣。
 5. 長短同距離唔理。幾隻字都合規則，就用形狀分數揀最似嗰隻；形狀分數 > 0.4（散到好離譜）先唔要。
 6. 拆解樹部件 3 筆以上（例如「湘」入面嘅「木」）照算，但母字嗰組筆畫唔可以多咗交叉（「重」個直筆穿過頂，唔係「里」）。
 7. 鉤：最尾向上或者向左嘅短段先當鉤（亅、了、心）；「九」「乙」最尾向右上嘅彎唔係鉤。單筆嘅鉤要一樣：直鉤（亅）唔可以當直（丨），所以「謝」冇「計」（Bill 定）。有轉角嘅筆（橫折／橫折鉤）唔分鉤，因為楷書字款唔穩定（「目」嘅 𠃌 畫咗鉤）。
 
 除錯：`--types 字` 印每筆類型；`--why 母字 字 0,1,3` 逐條規則印出嚟；`--worst 母字 字` 印最唔似嗰組筆畫。
-重新產生數據時加 `--keep-from 舊index.js`（或者舊版 `levels.js`），舊版嘅母字會保留。關數：環境變數 `TARGET`（預設 2000）。
+重新產生數據時加 `--keep-from 舊index.js`（或者舊版 `levels.js`），舊版嘅母字會保留；加 `--order-from 舊index.js`，舊關嘅關數唔變（新關排最後）。關數：環境變數 `TARGET`（預設 2000）。
+加分字：小學字以外嘅香港常用字（`HKX`），同一組筆畫小學字優先（`BONUS_PEN`）；每關存喺 `b`。
 
 改完門檻用對照表檢查（每個答案「最差」嗰組筆畫 vs 真字）：
 ```bash
