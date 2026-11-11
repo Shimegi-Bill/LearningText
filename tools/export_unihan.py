@@ -11,7 +11,8 @@ import sys
 
 COLS = ['character', 'kGradeLevel', 'kFrequency', 'kCantonese', 'kMandarin',
         'kSimplifiedVariant', 'kTraditionalVariant', 'kTotalStrokes',
-        'kBigFive', 'kHKGlyph', 'kDefinition']
+        'kBigFive', 'kHKGlyph', 'kDefinition', 'kSemanticVariant', 'kZVariant',
+        'kSpecializedSemanticVariant']
 
 db = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True)
 out = {}

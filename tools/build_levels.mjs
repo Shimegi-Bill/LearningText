@@ -695,41 +695,54 @@ if (process.argv.includes('--corners')) {
 }
 
 // ---------- 出關卡 ----------
+// 輸出：char-puzzle/levels/index.js（關卡清單）、levels/000.js…（每 100 關一個檔）、levels/chars.txt（用到嘅字，俾 build_dict.py）
+// 舊版母字一定保留：--keep-from 舊 levels.js 或者 levels/index.js（可以俾幾個）
+function readOldBases(file) {
+  const txt = fs.readFileSync(file, 'utf8');
+  const obj = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
+  return obj.levels ? obj.levels.map(l => l.c) : obj.list.map(x => x[0]);
+}
 if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from')) {
-    const t0 = Date.now();
+  const t0 = Date.now();
+  const TARGET = +(process.env.TARGET || 2000), CHUNK = 100;
   const KEEP = new Set();
-  for (let a = 0; a < process.argv.length; a++) if (process.argv[a] === '--keep-from') {
-    const txt = fs.readFileSync(process.argv[a + 1], 'utf8');
-    JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1)).levels.forEach(l => KEEP.add(l.c));
-  }
-  const bases = HK.filter(c => { const n = nStrokes(c); return n >= 4 && n <= 17; });
+  for (let a = 0; a < process.argv.length; a++) if (process.argv[a] === '--keep-from') readOldBases(process.argv[a + 1]).forEach(c => KEEP.add(c));
+  const grade = c => +(U[c].kGradeLevel || 7);
+  const freq = c => +(U[c].kFrequency || 6);
+  // 母字池：第 1 層小學字／常用字（3–22 畫），唔夠先用其他香港常用字（頻率 4、5…）
+  const inRange = c => { const n = nStrokes(c); return n >= 3 && n <= 22; };
+  const tiers = [
+    HK.filter(inRange),
+    [...G.keys()].filter(c => isHK(c) && !isKid(c) && freq(c) <= 4 && inRange(c)),
+    [...G.keys()].filter(c => isHK(c) && !isKid(c) && freq(c) > 4 && inRange(c)),
+  ];
+  const basic = new Set(['一', '二', '三', '十']);
   const results = [];
   let done = 0;
-  for (const B of bases) {
-    const res = solveBase(B);
-    const ans = [...res.answers.keys()];
-    const basic = new Set(['一', '二', '三', '十']);
-    const interesting = ans.filter(c => !basic.has(c) && c !== B).length;
-    // 新關要 5 隻字以上；舊版有嘅關（玩家可能有紀錄）3 隻字以上都保留
-    if ((ans.length >= 5 && interesting >= 2) || (KEEP.has(B) && ans.length >= 3)) results.push({ B, res, n: nStrokes(B), count: ans.length, interesting });
-    if (++done % 200 === 0) console.error(`${done}/${bases.length} ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  for (let t = 0; t < tiers.length; t++) {
+    const good = results.filter(r => r.ok).length;
+    if (t > 0 && good >= TARGET) break;
+    for (const B of tiers[t]) {
+      const res = solveBase(B);
+      const ans = [...res.answers.keys()];
+      const interesting = ans.filter(c => !basic.has(c) && c !== B).length;
+      const ok = ans.length >= 4 && interesting >= 1;
+      // 舊版有嘅關（玩家可能有紀錄）3 隻字以上都保留
+      if (ok || (KEEP.has(B) && ans.length >= 3)) results.push({ B, res, n: nStrokes(B), count: ans.length, interesting, tier: t, ok });
+      if (++done % 300 === 0) console.error(`${done} ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+    }
   }
-  // 每個筆畫數分配幾多關（少畫嘅先，慢慢加難）；同一筆畫數揀有趣答案多、小朋友早啲學嘅字
-  const QUOTA = { 4: 8, 5: 12, 6: 16, 7: 20, 8: 24, 9: 26, 10: 28, 11: 28, 12: 28, 13: 26, 14: 24, 15: 22, 16: 18, 17: 14 };
-  const grade = c => +(U[c].kGradeLevel || 7);
-  // 舊版有嘅母字（玩家可能玩緊、有紀錄）仲合格就一定保留：--keep-from 舊levels.js（可以俾幾個）
-  const keepSet = KEEP;
-  const chosen = [];
-  for (const [n, q] of Object.entries(QUOTA)) {
-    const pool = results.filter(r => r.n === +n && (r.interesting / r.count >= 0.3 || r.interesting >= 4 || keepSet.has(r.B)));
-    pool.forEach(r => { r.pick = Math.min(r.interesting, 10) + (grade(r.B) <= 3 ? 3 : grade(r.B) <= 6 ? 1.5 : 0) + (keepSet.has(r.B) ? 100 : 0); });
-    pool.sort((x, y) => y.pick - x.pick);
-    const kept = pool.filter(r => keepSet.has(r.B)).length;
-    chosen.push(...pool.slice(0, Math.max(q, kept)));
-  }
-  // 難度：筆畫數 + 答案數
-  chosen.forEach(r => { r.diff = r.n + 0.4 * Math.min(r.count, 24); });
-  chosen.sort((x, y) => x.diff - y.diff);
+  // 揀 2000 關：舊版母字先，然後第 1 層、答案有趣、低年級
+  results.forEach(r => { r.pick = (KEEP.has(r.B) ? 1000 : 0) - r.tier * 100 + Math.min(r.interesting, 10) + (8 - grade(r.B)) * 0.7; });
+  results.sort((x, y) => y.pick - x.pick);
+  const chosen = results.slice(0, Math.max(TARGET, results.filter(r => KEEP.has(r.B)).length));
+  // 難度（由易到難）：母字筆畫、答案數目、答案平均筆畫、母字年級
+  chosen.forEach(r => {
+    const others = [...r.res.answers.keys()].filter(c => c !== r.B);
+    const avgS = others.reduce((s, c) => s + nStrokes(c), 0) / Math.max(1, others.length);
+    r.diff = r.n + 0.6 * Math.min(r.count, 24) + 0.5 * avgS + 0.8 * (grade(r.B) - 1);
+  });
+  chosen.sort((x, y) => x.diff - y.diff || x.B.localeCompare(y.B));
 
   const R = {}; // 讀音表
   const reads = ch => { if (!R[ch]) { const r = reading(ch); R[ch] = [r.jp, r.py]; } };
@@ -737,11 +750,9 @@ if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from'))
   const levels = chosen.map(({ B, res }) => {
     const d = G.get(B);
     reads(B);
-    // 答案排次序：筆畫少嘅先，母字自己最後
     const ans = [...res.answers.entries()].sort((a, b) => (a[0] === B) - (b[0] === B) || nStrokes(a[0]) - nStrokes(b[0]) || a[0].localeCompare(b[0]));
     // 多過 24 個：保留母字，其他按年級（低年級先）揀，再按筆畫排返
-    const g = c => +(U[c].kGradeLevel || 7);
-    const keep = ans.length <= 24 ? ans : [...ans.filter(a => a[0] !== B).sort((x, y) => g(x[0]) - g(y[0]) || nStrokes(x[0]) - nStrokes(y[0])).slice(0, 23), ...ans.filter(a => a[0] === B)]
+    const keep = ans.length <= 24 ? ans : [...ans.filter(a => a[0] !== B).sort((x, y) => grade(x[0]) - grade(y[0]) || nStrokes(x[0]) - nStrokes(y[0])).slice(0, 23), ...ans.filter(a => a[0] === B)]
       .sort((a, b) => (a[0] === B) - (b[0] === B) || nStrokes(a[0]) - nStrokes(b[0]) || a[0].localeCompare(b[0]));
     const answers = keep.map(([ch, subs]) => { reads(ch); return [ch, subs.sort((x, y) => x.score - y.score).slice(0, 150).map(x => mask(x.idx))]; });
     const decoys = [...res.decoys.entries()].map(([ch, subs]) => [ch, tradOf(ch), subs.sort((x, y) => x.score - y.score).slice(0, 30).map(x => mask(x.idx))]);
@@ -753,14 +764,30 @@ if (!TEST && !process.argv.some(a => a.startsWith('--') && a !== '--keep-from'))
       d: decoys,
     };
   });
-  const out = { v: 1, built: new Date().toISOString().slice(0, 10), levels, readings: R };
-  const js = '// 由 tools/build_levels.mjs 自動產生，唔好人手改\n// 筆畫數據：Make Me a Hanzi（Arphic Public License），字表同讀音：Unicode Unihan\nwindow.LEVELS=' + JSON.stringify(out) + ';\n';
-  const dest = path.join(ROOT, 'char-puzzle', 'levels.js');
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.writeFileSync(dest, js);
-  console.log(`bases ${bases.length}, usable ${results.length}, levels ${levels.length}, size ${(js.length / 1024).toFixed(0)} KB, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  const dir = path.join(ROOT, 'char-puzzle', 'levels');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const head = '// 由 tools/build_levels.mjs 自動產生，唔好人手改\n// 筆畫數據：Make Me a Hanzi（Arphic Public License），字表同讀音：Unicode Unihan\n';
+  const built = new Date().toISOString().slice(0, 10);
+  const index = { v: 2, built, n: levels.length, chunk: CHUNK, list: levels.map(l => [l.c, l.a.length]), readings: R };
+  fs.writeFileSync(path.join(dir, 'index.js'), head + 'window.LV_INDEX=' + JSON.stringify(index) + ';\n');
+  let total = 0;
+  for (let k = 0; k * CHUNK < levels.length; k++) {
+    const js = head + `(window.LV_CHUNKS=window.LV_CHUNKS||{})[${k}]=` + JSON.stringify(levels.slice(k * CHUNK, (k + 1) * CHUNK)) + ';\n';
+    fs.writeFileSync(path.join(dir, String(k).padStart(3, '0') + '.js'), js);
+    total += js.length;
+  }
+  // 用到嘅字（母字 ＋ 答案 ＋ 陷阱嘅繁體），俾 build_dict.py 整解釋
+  const chars = new Set();
+  levels.forEach(l => { chars.add(l.c); l.a.forEach(a => chars.add(a[0])); l.d.forEach(d => chars.add(d[1])); });
+  fs.writeFileSync(path.join(dir, 'chars.txt'), [...chars].join('') + '\n');
+  const old = path.join(ROOT, 'char-puzzle', 'levels.js');
+  if (fs.existsSync(old)) fs.rmSync(old);
+  console.log(`results ${results.length}, levels ${levels.length}, chunks ${Math.ceil(levels.length / CHUNK)}, total ${(total / 1024 / 1024).toFixed(1)} MB, chars ${chars.size}, ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  console.log('tiers used', [0, 1, 2].map(t => chosen.filter(r => r.tier === t).length).join('/'), 'kept old', chosen.filter(r => KEEP.has(r.B)).length);
   console.log(levels.slice(0, 40).map((l, i) => `${i + 1}.${l.c}(${l.a.length})`).join(' '));
-  console.log('...', levels.slice(-20).map(l => `${l.c}(${l.a.length})`).join(' '));
+  console.log('...', levels.slice(990, 1005).map((l, i) => `${991 + i}.${l.c}(${l.a.length})`).join(' '));
+  console.log('...', levels.slice(-15).map((l, i) => `${levels.length - 14 + i}.${l.c}(${l.a.length})`).join(' '));
 }
 
 // ---------- 對照表：每個答案「最差」嗰組筆畫 vs 真字，俾人眼睇 ----------
@@ -770,7 +797,7 @@ if (process.argv.includes('--review')) {
   const out = process.argv[i + 1];
   const chars = process.argv.slice(i + 2).join('').split('');
   const LVNO = {};
-  try { const t = fs.readFileSync(path.join(ROOT, 'char-puzzle', 'levels.js'), 'utf8'); JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)).levels.forEach((l, k) => { LVNO[l.c] = k + 1; }); } catch (e) {}
+  try { readOldBases(path.join(ROOT, 'char-puzzle', 'levels', 'index.js')).forEach((c, k) => { LVNO[c] = k + 1; }); } catch (e) {}
   const svgOf = (ch, idx) => {
     const d = G.get(ch);
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
